@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"modelView/extract/buildConfig"
 	"modelView/extract/buildinfo"
+	"modelView/extract/idxPackages"
 	"modelView/viewer"
 	"os"
 )
@@ -16,6 +17,8 @@ func main() {
 	bInfo := readBuildInfo()
 
 	readBuildConfig(bInfo.GetBuildKey())
+
+	idxPackages.ReadIdxPackages()
 
 	if *view {
 		if err := viewer.Run(viewer.DefaultConfig()); err != nil {
