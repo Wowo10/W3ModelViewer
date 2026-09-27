@@ -1,0 +1,152 @@
+// Package viewer hosts the interactive window: SDL2 owns the window and the
+// input queue, go-gl issues the GL calls and cimgui-go draws the UI on top.
+package viewer
+
+import (
+	"fmt"
+	"runtime"
+	"unsafe"
+
+	"github.com/AllenDang/cimgui-go/imgui"
+	"github.com/AllenDang/cimgui-go/impl/opengl3"
+	"github.com/AllenDang/cimgui-go/impl/sdl2"
+	"github.com/go-gl/gl/v3.2-core/gl"
+	"github.com/veandco/go-sdl2/sdl"
+)
+
+// Config describes the window to open.
+type Config struct {
+	Title  string
+	Width  int32
+	Height int32
+}
+
+// DefaultConfig returns the settings used by the --view flag.
+func DefaultConfig() Config {
+	return Config{Title: "modelViewer", Width: 1280, Height: 720}
+}
+
+// glslVersion matches the 3.2 core profile requested below.
+const glslVersion = "#version 150"
+
+// Run opens the window and pumps events until the user closes it.
+func Run(cfg Config) error {
+	// The GL context is bound to one OS thread, so this goroutine must stay put.
+	runtime.LockOSThread()
+
+	if err := sdl.Init(sdl.INIT_VIDEO | sdl.INIT_EVENTS); err != nil {
+		return fmt.Errorf("sdl init: %w", err)
+	}
+	defer sdl.Quit()
+
+	for _, attr := range []struct {
+		key sdl.GLattr
+		val int
+	}{
+		{sdl.GL_CONTEXT_MAJOR_VERSION, 3},
+		{sdl.GL_CONTEXT_MINOR_VERSION, 2},
+		{sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_CORE},
+		{sdl.GL_DOUBLEBUFFER, 1},
+		{sdl.GL_DEPTH_SIZE, 24},
+		{sdl.GL_STENCIL_SIZE, 8},
+	} {
+		if err := sdl.GLSetAttribute(attr.key, attr.val); err != nil {
+			return fmt.Errorf("sdl gl attribute %d: %w", attr.key, err)
+		}
+	}
+
+	window, err := sdl.CreateWindow(
+		cfg.Title,
+		sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED,
+		cfg.Width, cfg.Height,
+		sdl.WINDOW_OPENGL|sdl.WINDOW_RESIZABLE|sdl.WINDOW_SHOWN|sdl.WINDOW_ALLOW_HIGHDPI,
+	)
+	if err != nil {
+		return fmt.Errorf("create window: %w", err)
+	}
+	defer window.Destroy()
+
+	glCtx, err := window.GLCreateContext()
+	if err != nil {
+		return fmt.Errorf("create gl context: %w", err)
+	}
+	defer sdl.GLDeleteContext(glCtx)
+
+	if err := window.GLMakeCurrent(glCtx); err != nil {
+		return fmt.Errorf("make gl context current: %w", err)
+	}
+	if err := sdl.GLSetSwapInterval(1); err != nil {
+		// Not fatal: some drivers refuse vsync, we just run uncapped.
+		fmt.Println("viewer: vsync unavailable:", err)
+	}
+
+	if err := gl.Init(); err != nil {
+		return fmt.Errorf("gl init: %w", err)
+	}
+	fmt.Println("viewer: OpenGL", gl.GoStr(gl.GetString(gl.VERSION)))
+
+	imgui.CreateContext()
+	defer imgui.DestroyContext()
+
+	io := imgui.CurrentIO()
+	io.SetConfigFlags(io.ConfigFlags() | imgui.ConfigFlagsNavEnableKeyboard)
+	imgui.StyleColorsDark()
+
+	if !sdl2.InitForOpenGL(sdl2.NewSDLWindowFromC(unsafe.Pointer(window)), uintptr(unsafe.Pointer(glCtx))) {
+		return fmt.Errorf("imgui sdl2 backend init failed")
+	}
+	defer sdl2.Shutdown()
+
+	if !opengl3.InitV(glslVersion) {
+		return fmt.Errorf("imgui opengl3 backend init failed")
+	}
+	defer opengl3.Shutdown()
+
+	ui := newUIState()
+
+	for !ui.quit {
+		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+			processEvent(event)
+
+			switch e := event.(type) {
+			case *sdl.QuitEvent:
+				ui.quit = true
+			case *sdl.WindowEvent:
+				if e.Event == sdl.WINDOWEVENT_CLOSE && e.WindowID == windowID(window) {
+					ui.quit = true
+				}
+			}
+		}
+
+		if window.GetFlags()&sdl.WINDOW_MINIMIZED != 0 {
+			sdl.Delay(10)
+			continue
+		}
+
+		opengl3.NewFrame()
+		sdl2.NewFrame()
+		imgui.NewFrame()
+
+		ui.draw()
+
+		imgui.Render()
+
+		w, h := window.GLGetDrawableSize()
+		gl.Viewport(0, 0, w, h)
+		gl.ClearColor(ui.clearColor[0], ui.clearColor[1], ui.clearColor[2], 1)
+		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+		opengl3.RenderDrawData(imgui.CurrentDrawData())
+
+		window.GLSwap()
+	}
+
+	return nil
+}
+
+func windowID(window *sdl.Window) uint32 {
+	id, err := window.GetID()
+	if err != nil {
+		return 0
+	}
+	return id
+}
