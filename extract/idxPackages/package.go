@@ -50,9 +50,12 @@ type IndexEntry struct {
 func ReadIdxPackages() (m map[[9]byte]IndexEntry) {
 	m = make(map[[9]byte]IndexEntry)
 
+	archives := make(archiveFiles)
+	defer archives.closeAll()
+
 	for _, filename := range filenames {
 		path := filepath.Join(dataPath, filename)
-		entries := readIdxPackage(path)
+		entries := readIdxPackage(path, archives)
 
 		if DEBUG {
 			fmt.Printf("Read %d entries from %s\n", len(entries), filename)
@@ -64,7 +67,7 @@ func ReadIdxPackages() (m map[[9]byte]IndexEntry) {
 	return m
 }
 
-func readIdxPackage(path string) (m map[[9]byte]IndexEntry) {
+func readIdxPackage(path string, archives archiveFiles) (m map[[9]byte]IndexEntry) {
 	m = make(map[[9]byte]IndexEntry)
 
 	data, err := os.ReadFile(path)
@@ -88,7 +91,7 @@ func readIdxPackage(path string) (m map[[9]byte]IndexEntry) {
 		}
 		m[key] = entry
 
-		verifyEntry(key, entry)
+		verifyEntry(key, entry, archives)
 	}
 
 	return m
@@ -122,22 +125,37 @@ func bucket(key [9]byte) byte {
 }
 
 // verifyEntry cross-checks an index entry against the header stored in its archive.
-func verifyEntry(key [9]byte, entry IndexEntry) {
-	header := readArchiveHeader(entry)
+func verifyEntry(key [9]byte, entry IndexEntry, archives archiveFiles) {
+	header := readArchiveHeader(archives.get(entry.Archive), entry)
 
 	checkMagic(header, entry)
 	checkKey(header, key)
 	checkSize(header, entry)
 }
 
-func readArchiveHeader(entry IndexEntry) []byte {
-	checkPath := filepath.Join(dataPath, fmt.Sprintf("data.%03d", entry.Archive))
-	f, err := os.Open(checkPath)
+// archiveFiles keeps data.### files open so each archive is opened only once.
+type archiveFiles map[uint32]*os.File
+
+func (a archiveFiles) get(archive uint32) *os.File {
+	if f, ok := a[archive]; ok {
+		return f
+	}
+
+	f, err := os.Open(filepath.Join(dataPath, fmt.Sprintf("data.%03d", archive)))
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	a[archive] = f
+	return f
+}
 
+func (a archiveFiles) closeAll() {
+	for _, f := range a {
+		f.Close()
+	}
+}
+
+func readArchiveHeader(f *os.File, entry IndexEntry) []byte {
 	header := make([]byte, archiveHeaderSize+len(blteMagic))
 	if _, err := f.ReadAt(header, int64(entry.Offset)); err != nil {
 		panic(err)
