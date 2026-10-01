@@ -6,6 +6,7 @@ type BuildConfig map[string]string
 
 const (
 	encoding = "encoding"
+	root     = "root"
 )
 
 func ReadBuildConfig(data []byte) BuildConfig {
@@ -46,4 +47,8 @@ func (b BuildConfig) GetEncoding() (cKey, eKey string) {
 	}
 
 	return cKey, eKey
+}
+
+func (b BuildConfig) GetRoot() (cKey string) {
+	return b[root]
 }

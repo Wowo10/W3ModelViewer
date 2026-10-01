@@ -29,7 +29,7 @@ var filenames = []string{
 	"090000001c.idx",
 }
 
-const DEBUG = false
+var DEBUG = false
 
 const (
 	entriesSizeOffset = 0x20
@@ -162,6 +162,22 @@ func (a archiveFiles) closeAll() {
 	for _, f := range a {
 		f.Close()
 	}
+}
+
+// ReadEntry reads an entry's payload from its archive, without the 30-byte header.
+func ReadEntry(entry IndexEntry) []byte {
+	f, err := os.Open(filepath.Join(dataPath, fmt.Sprintf("data.%03d", entry.Archive)))
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	data := make([]byte, entry.Size-archiveHeaderSize)
+	if _, err := f.ReadAt(data, int64(entry.Offset)+archiveHeaderSize); err != nil {
+		panic(err)
+	}
+
+	return data
 }
 
 func readArchiveHeader(f *os.File, entry IndexEntry) []byte {
