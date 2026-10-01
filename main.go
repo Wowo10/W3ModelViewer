@@ -13,6 +13,7 @@ import (
 
 func main() {
 	view := flag.Bool("view", false, "open the model viewer window")
+	verify := flag.Bool("verify", true, "cross-check idx entries against archive headers")
 	flag.Parse()
 
 	bInfo := readBuildInfo()
@@ -20,7 +21,7 @@ func main() {
 	config := readBuildConfig(bInfo.GetBuildKey())
 	_, ekey := config.GetEncoding()
 
-	findEncodingPackage(ekey)
+	findEncodingPackage(ekey, *verify)
 
 	if *view {
 		runViewer()
@@ -61,14 +62,14 @@ func configPath(filename string) string {
 }
 
 // findEncodingPackage looks up the encoding file's location in the local idx packages.
-func findEncodingPackage(ekey string) idxPackages.IndexEntry {
+func findEncodingPackage(ekey string, verify bool) idxPackages.IndexEntry {
 	ekeyDecoded, err := hex.DecodeString(ekey)
 	if err != nil {
 		panic(err)
 	}
 	key := [9]byte(ekeyDecoded[:9])
 
-	packages := idxPackages.ReadIdxPackages()
+	packages := idxPackages.ReadIdxPackages(verify)
 
 	packageEntry, exists := packages[key]
 	if !exists {

@@ -47,7 +47,9 @@ type IndexEntry struct {
 	Size    uint32 // total bytes, including the 30-byte header
 }
 
-func ReadIdxPackages() (m map[[9]byte]IndexEntry) {
+// ReadIdxPackages reads all local idx files. With verify set, every entry is
+// cross-checked against the header stored in its archive.
+func ReadIdxPackages(verify bool) (m map[[9]byte]IndexEntry) {
 	m = make(map[[9]byte]IndexEntry)
 
 	archives := make(archiveFiles)
@@ -55,7 +57,7 @@ func ReadIdxPackages() (m map[[9]byte]IndexEntry) {
 
 	for _, filename := range filenames {
 		path := filepath.Join(dataPath, filename)
-		entries := readIdxPackage(path, archives)
+		entries := readIdxPackage(path, archives, verify)
 
 		if DEBUG {
 			fmt.Printf("Read %d entries from %s\n", len(entries), filename)
@@ -67,7 +69,7 @@ func ReadIdxPackages() (m map[[9]byte]IndexEntry) {
 	return m
 }
 
-func readIdxPackage(path string, archives archiveFiles) (m map[[9]byte]IndexEntry) {
+func readIdxPackage(path string, archives archiveFiles, verify bool) (m map[[9]byte]IndexEntry) {
 	m = make(map[[9]byte]IndexEntry)
 
 	data, err := os.ReadFile(path)
@@ -91,7 +93,9 @@ func readIdxPackage(path string, archives archiveFiles) (m map[[9]byte]IndexEntr
 		}
 		m[key] = entry
 
-		verifyEntry(key, entry, archives)
+		if verify {
+			verifyEntry(key, entry, archives)
+		}
 	}
 
 	return m
