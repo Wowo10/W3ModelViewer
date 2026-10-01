@@ -91,11 +91,11 @@ func readIdxPackage(path string, archives archiveFiles, verify bool) (m map[[9]b
 		if DEBUG {
 			fmt.Printf("IndexEntry %d, %x: %+v, B:%x\n", i, key[:], entry, bucket(key))
 		}
-		m[key] = entry
-
-		if verify {
-			verifyEntry(key, entry, archives)
+		if verify && !verifyEntry(key, entry, archives) {
+			continue
 		}
+
+		m[key] = entry
 	}
 
 	return m
@@ -129,12 +129,17 @@ func bucket(key [9]byte) byte {
 }
 
 // verifyEntry cross-checks an index entry against the header stored in its archive.
-func verifyEntry(key [9]byte, entry IndexEntry, archives archiveFiles) {
+// It returns false for entries without a BLTE payload, which should be skipped.
+func verifyEntry(key [9]byte, entry IndexEntry, archives archiveFiles) bool {
 	header := readArchiveHeader(archives.get(entry.Archive), entry)
 
-	checkMagic(header, entry)
+	if !checkMagic(header, entry) {
+		return false
+	}
 	checkKey(header, key)
 	checkSize(header, entry)
+
+	return true
 }
 
 // archiveFiles keeps data.### files open so each archive is opened only once.
@@ -168,16 +173,16 @@ func readArchiveHeader(f *os.File, entry IndexEntry) []byte {
 	return header
 }
 
-func checkMagic(header []byte, entry IndexEntry) {
+// checkMagic reports whether the payload is BLTE-encoded. Some entries, such as
+// the patch manifest ("PA"), are stored raw and carry nothing we need.
+func checkMagic(header []byte, entry IndexEntry) bool {
 	magic := string(header[archiveHeaderSize : archiveHeaderSize+len(blteMagic)])
 
 	if DEBUG {
 		fmt.Println("magic:", magic) // should print BLTE
 	}
 
-	if entry.Size > archiveHeaderSize && magic != blteMagic {
-		panic(fmt.Sprintf("Invalid magic number: %s", magic))
-	}
+	return entry.Size <= archiveHeaderSize || magic == blteMagic
 }
 
 func checkKey(header []byte, key [9]byte) {
