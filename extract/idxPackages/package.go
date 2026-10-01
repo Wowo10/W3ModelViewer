@@ -8,10 +8,6 @@ import (
 	"path/filepath"
 )
 
-const (
-	encoding = "encoding"
-)
-
 var dataPath = "wardata/Data/data/"
 
 var filenames = []string{
@@ -34,6 +30,16 @@ var filenames = []string{
 }
 
 const DEBUG = false
+
+const (
+	entriesSizeOffset = 0x20
+	entriesOffset     = 0x28
+	entrySize         = 18 // 9-byte key + 5-byte archive/offset + 4-byte size
+	keySize           = 9
+
+	archiveHeaderSize = 30
+	blteMagic         = "BLTE"
+)
 
 type IndexEntry struct {
 	Archive uint32 // which data.### file
@@ -66,89 +72,120 @@ func readIdxPackage(path string) (m map[[9]byte]IndexEntry) {
 		panic(err)
 	}
 
-	entriesSize := binary.LittleEndian.Uint32(data[0x20:0x24])
-	count := int(entriesSize) / 18 // each entry is 18 bytes
+	entriesSize := binary.LittleEndian.Uint32(data[entriesSizeOffset : entriesSizeOffset+4])
+	count := int(entriesSize) / entrySize
 
 	if DEBUG {
 		fmt.Println("count:", count)
 	}
 
 	for i := range count {
-		entryOffset := 0x28 + i*18
-
-		var key [9]byte
-		copy(key[:], data[entryOffset:entryOffset+9])
-
-		size := binary.LittleEndian.Uint32(data[entryOffset+14 : entryOffset+18])
-
-		raw := uint64(0)
-		for _, b := range data[entryOffset+9 : entryOffset+14] {
-			raw = raw<<8 | uint64(b)
-		}
-
-		archive := raw >> 30
-		offset := raw & 0x3FFFFFFF
-
-		entry := IndexEntry{
-			Archive: uint32(archive),
-			Offset:  uint32(offset),
-			Size:    size,
-		}
-
-		var x byte
-		for _, b := range key {
-			x ^= b
-		}
-		bucket := (x & 0x0F) ^ (x >> 4)
+		entryOffset := entriesOffset + i*entrySize
+		key, entry := parseEntry(data[entryOffset : entryOffset+entrySize])
 
 		if DEBUG {
-			fmt.Printf("IndexEntry %d, %x: %+v, B:%x\n", i, key[:], entry, bucket)
+			fmt.Printf("IndexEntry %d, %x: %+v, B:%x\n", i, key[:], entry, bucket(key))
 		}
 		m[key] = entry
 
-		//check
-		checkPath := filepath.Join(dataPath, fmt.Sprintf("data.%03d", entry.Archive))
-		f, err := os.Open(checkPath)
-		if err != nil {
-			panic(err)
-		}
-		defer f.Close()
-
-		header := make([]byte, 34) // 30-byte header + 4 bytes for "BLTE"
-		if _, err := f.ReadAt(header, int64(entry.Offset)); err != nil {
-			panic(err)
-		}
-
-		if DEBUG {
-			fmt.Println("magic:", string(header[30:34])) // should print BLTE
-		}
-
-		if size > 30 && string(header[30:34]) != "BLTE" {
-			panic(fmt.Sprintf("Invalid magic number: %s", string(header[30:34])))
-		}
-
-		var ekey [16]byte
-		for j := 0; j < 16; j++ {
-			ekey[j] = header[15-j]
-		}
-
-		if DEBUG {
-			fmt.Printf("from header: %x\nfrom index:  %x\n", ekey[:9], key) // should match
-		}
-
-		if string(ekey[:9]) != string(key[:]) {
-			panic(fmt.Sprintf("Key mismatch: from header: %x, from index: %x", ekey[:9], key))
-		}
-
-		if DEBUG {
-			fmt.Println("header size:", binary.LittleEndian.Uint32(header[16:20]), "index size:", entry.Size)
-		}
-
-		if binary.LittleEndian.Uint32(header[16:20]) != entry.Size {
-			panic(fmt.Sprintf("Size mismatch: from header: %d, from index: %d", binary.LittleEndian.Uint32(header[16:20]), entry.Size))
-		}
-
+		verifyEntry(key, entry)
 	}
 
 	return m
+}
+
+// parseEntry decodes one 18-byte index record.
+func parseEntry(raw []byte) (key [9]byte, entry IndexEntry) {
+	copy(key[:], raw[:keySize])
+
+	// 5 bytes big-endian: top 10 bits are the archive number, low 30 the offset.
+	packed := uint64(0)
+	for _, b := range raw[keySize : keySize+5] {
+		packed = packed<<8 | uint64(b)
+	}
+
+	entry = IndexEntry{
+		Archive: uint32(packed >> 30),
+		Offset:  uint32(packed & 0x3FFFFFFF),
+		Size:    binary.LittleEndian.Uint32(raw[keySize+5 : keySize+9]),
+	}
+
+	return key, entry
+}
+
+func bucket(key [9]byte) byte {
+	var x byte
+	for _, b := range key {
+		x ^= b
+	}
+	return (x & 0x0F) ^ (x >> 4)
+}
+
+// verifyEntry cross-checks an index entry against the header stored in its archive.
+func verifyEntry(key [9]byte, entry IndexEntry) {
+	header := readArchiveHeader(entry)
+
+	checkMagic(header, entry)
+	checkKey(header, key)
+	checkSize(header, entry)
+}
+
+func readArchiveHeader(entry IndexEntry) []byte {
+	checkPath := filepath.Join(dataPath, fmt.Sprintf("data.%03d", entry.Archive))
+	f, err := os.Open(checkPath)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	header := make([]byte, archiveHeaderSize+len(blteMagic))
+	if _, err := f.ReadAt(header, int64(entry.Offset)); err != nil {
+		panic(err)
+	}
+
+	return header
+}
+
+func checkMagic(header []byte, entry IndexEntry) {
+	magic := string(header[archiveHeaderSize : archiveHeaderSize+len(blteMagic)])
+
+	if DEBUG {
+		fmt.Println("magic:", magic) // should print BLTE
+	}
+
+	if entry.Size > archiveHeaderSize && magic != blteMagic {
+		panic(fmt.Sprintf("Invalid magic number: %s", magic))
+	}
+}
+
+func checkKey(header []byte, key [9]byte) {
+	ekey := headerEKey(header)
+
+	if DEBUG {
+		fmt.Printf("from header: %x\nfrom index:  %x\n", ekey[:9], key) // should match
+	}
+
+	if string(ekey[:9]) != string(key[:]) {
+		panic(fmt.Sprintf("Key mismatch: from header: %x, from index: %x", ekey[:9], key))
+	}
+}
+
+// headerEKey returns the encoding key, which the archive header stores byte-reversed.
+func headerEKey(header []byte) (ekey [16]byte) {
+	for j := range 16 {
+		ekey[j] = header[15-j]
+	}
+	return ekey
+}
+
+func checkSize(header []byte, entry IndexEntry) {
+	headerSize := binary.LittleEndian.Uint32(header[16:20])
+
+	if DEBUG {
+		fmt.Println("header size:", headerSize, "index size:", entry.Size)
+	}
+
+	if headerSize != entry.Size {
+		panic(fmt.Sprintf("Size mismatch: from header: %d, from index: %d", headerSize, entry.Size))
+	}
 }

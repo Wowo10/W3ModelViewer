@@ -39,6 +39,58 @@ func Run(cfg Config) error {
 	}
 	defer sdl.Quit()
 
+	if err := setGLAttributes(); err != nil {
+		return err
+	}
+
+	window, err := createWindow(cfg)
+	if err != nil {
+		return err
+	}
+	defer window.Destroy()
+
+	glCtx, err := window.GLCreateContext()
+	if err != nil {
+		return fmt.Errorf("create gl context: %w", err)
+	}
+	defer sdl.GLDeleteContext(glCtx)
+
+	if err := initGL(window, glCtx); err != nil {
+		return err
+	}
+
+	imgui.CreateContext()
+	defer imgui.DestroyContext()
+
+	configureImGui()
+
+	if !sdl2.InitForOpenGL(sdl2.NewSDLWindowFromC(unsafe.Pointer(window)), uintptr(unsafe.Pointer(glCtx))) {
+		return fmt.Errorf("imgui sdl2 backend init failed")
+	}
+	defer sdl2.Shutdown()
+
+	if !opengl3.InitV(glslVersion) {
+		return fmt.Errorf("imgui opengl3 backend init failed")
+	}
+	defer opengl3.Shutdown()
+
+	ui := newUIState()
+
+	for !ui.quit {
+		pollEvents(window, ui)
+
+		if window.GetFlags()&sdl.WINDOW_MINIMIZED != 0 {
+			sdl.Delay(10)
+			continue
+		}
+
+		renderFrame(window, ui)
+	}
+
+	return nil
+}
+
+func setGLAttributes() error {
 	for _, attr := range []struct {
 		key sdl.GLattr
 		val int
@@ -54,7 +106,10 @@ func Run(cfg Config) error {
 			return fmt.Errorf("sdl gl attribute %d: %w", attr.key, err)
 		}
 	}
+	return nil
+}
 
+func createWindow(cfg Config) (*sdl.Window, error) {
 	window, err := sdl.CreateWindow(
 		cfg.Title,
 		sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED,
@@ -62,16 +117,13 @@ func Run(cfg Config) error {
 		sdl.WINDOW_OPENGL|sdl.WINDOW_RESIZABLE|sdl.WINDOW_SHOWN|sdl.WINDOW_ALLOW_HIGHDPI,
 	)
 	if err != nil {
-		return fmt.Errorf("create window: %w", err)
+		return nil, fmt.Errorf("create window: %w", err)
 	}
-	defer window.Destroy()
+	return window, nil
+}
 
-	glCtx, err := window.GLCreateContext()
-	if err != nil {
-		return fmt.Errorf("create gl context: %w", err)
-	}
-	defer sdl.GLDeleteContext(glCtx)
-
+// initGL makes glCtx current, enables vsync if possible and loads the GL functions.
+func initGL(window *sdl.Window, glCtx sdl.GLContext) error {
 	if err := window.GLMakeCurrent(glCtx); err != nil {
 		return fmt.Errorf("make gl context current: %w", err)
 	}
@@ -84,63 +136,48 @@ func Run(cfg Config) error {
 		return fmt.Errorf("gl init: %w", err)
 	}
 	fmt.Println("viewer: OpenGL", gl.GoStr(gl.GetString(gl.VERSION)))
+	return nil
+}
 
-	imgui.CreateContext()
-	defer imgui.DestroyContext()
-
+func configureImGui() {
 	io := imgui.CurrentIO()
 	io.SetConfigFlags(io.ConfigFlags() | imgui.ConfigFlagsNavEnableKeyboard)
 	imgui.StyleColorsDark()
+}
 
-	if !sdl2.InitForOpenGL(sdl2.NewSDLWindowFromC(unsafe.Pointer(window)), uintptr(unsafe.Pointer(glCtx))) {
-		return fmt.Errorf("imgui sdl2 backend init failed")
-	}
-	defer sdl2.Shutdown()
+// pollEvents drains the SDL queue, forwarding everything to ImGui and
+// flagging ui.quit when the window is closed.
+func pollEvents(window *sdl.Window, ui *uiState) {
+	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+		processEvent(event)
 
-	if !opengl3.InitV(glslVersion) {
-		return fmt.Errorf("imgui opengl3 backend init failed")
-	}
-	defer opengl3.Shutdown()
-
-	ui := newUIState()
-
-	for !ui.quit {
-		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
-			processEvent(event)
-
-			switch e := event.(type) {
-			case *sdl.QuitEvent:
+		switch e := event.(type) {
+		case *sdl.QuitEvent:
+			ui.quit = true
+		case *sdl.WindowEvent:
+			if e.Event == sdl.WINDOWEVENT_CLOSE && e.WindowID == windowID(window) {
 				ui.quit = true
-			case *sdl.WindowEvent:
-				if e.Event == sdl.WINDOWEVENT_CLOSE && e.WindowID == windowID(window) {
-					ui.quit = true
-				}
 			}
 		}
-
-		if window.GetFlags()&sdl.WINDOW_MINIMIZED != 0 {
-			sdl.Delay(10)
-			continue
-		}
-
-		opengl3.NewFrame()
-		sdl2.NewFrame()
-		imgui.NewFrame()
-
-		ui.draw()
-
-		imgui.Render()
-
-		w, h := window.GLGetDrawableSize()
-		gl.Viewport(0, 0, w, h)
-		gl.ClearColor(ui.clearColor[0], ui.clearColor[1], ui.clearColor[2], 1)
-		gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-		opengl3.RenderDrawData(imgui.CurrentDrawData())
-
-		window.GLSwap()
 	}
+}
 
-	return nil
+func renderFrame(window *sdl.Window, ui *uiState) {
+	opengl3.NewFrame()
+	sdl2.NewFrame()
+	imgui.NewFrame()
+
+	ui.draw()
+
+	imgui.Render()
+
+	w, h := window.GLGetDrawableSize()
+	gl.Viewport(0, 0, w, h)
+	gl.ClearColor(ui.clearColor[0], ui.clearColor[1], ui.clearColor[2], 1)
+	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	opengl3.RenderDrawData(imgui.CurrentDrawData())
+
+	window.GLSwap()
 }
 
 func windowID(window *sdl.Window) uint32 {

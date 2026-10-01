@@ -12,21 +12,28 @@ func ReadBuildConfig(data []byte) BuildConfig {
 	content := strings.TrimSuffix(strings.TrimSuffix(string(data), "\n"), "\r")
 	lines := strings.Split(content, "\n")
 
-	BuildConfig := make(BuildConfig)
+	config := make(BuildConfig)
 
 	for _, line := range lines {
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		if key != "" {
-			BuildConfig[key] = value
+		key, value, ok := parseLine(line)
+		if ok {
+			config[key] = value
 		}
 	}
 
-	return BuildConfig
+	return config
+}
+
+// parseLine splits a "key = value" line; ok is false for lines without a key.
+func parseLine(line string) (key, value string, ok bool) {
+	parts := strings.SplitN(line, "=", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	key = strings.TrimSpace(parts[0])
+	value = strings.TrimSpace(parts[1])
+
+	return key, value, key != ""
 }
 
 func (b BuildConfig) GetEncoding() (cKey, eKey string) {
