@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"modelView/extract/buildConfig"
@@ -16,9 +17,22 @@ func main() {
 
 	bInfo := readBuildInfo()
 
-	readBuildConfig(bInfo.GetBuildKey())
+	config := readBuildConfig(bInfo.GetBuildKey())
+	_, ekey := config.GetEncoding()
 
-	idxPackages.ReadIdxPackages()
+	ekeyDecoded, err := hex.DecodeString(ekey)
+	if err != nil {
+		panic(err)
+	}
+
+	packages := idxPackages.ReadIdxPackages()
+
+	packageEntry, exists := packages[[9]byte(ekeyDecoded[:9])]
+	if !exists {
+		panic(fmt.Sprintf("Encoding key %x not found in index packages", ekeyDecoded[:9]))
+	}
+
+	fmt.Printf("Encoding key %x found in archive %d at offset %d with size %d\n", ekeyDecoded[:9], packageEntry.Archive, packageEntry.Offset, packageEntry.Size)
 
 	if *view {
 		if err := viewer.Run(viewer.DefaultConfig()); err != nil {

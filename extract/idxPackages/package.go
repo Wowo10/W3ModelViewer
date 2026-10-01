@@ -3,6 +3,7 @@ package idxPackages
 import (
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 )
@@ -40,10 +41,21 @@ type IndexEntry struct {
 	Size    uint32 // total bytes, including the 30-byte header
 }
 
-func ReadIdxPackages() map[string][]IndexEntry {
-	readIdxPackage(dataPath + filenames[0])
+func ReadIdxPackages() (m map[[9]byte]IndexEntry) {
+	m = make(map[[9]byte]IndexEntry)
 
-	return nil
+	for _, filename := range filenames {
+		path := filepath.Join(dataPath, filename)
+		entries := readIdxPackage(path)
+
+		if DEBUG {
+			fmt.Printf("Read %d entries from %s\n", len(entries), filename)
+		}
+
+		maps.Copy(m, entries)
+	}
+
+	return m
 }
 
 func readIdxPackage(path string) (m map[[9]byte]IndexEntry) {
