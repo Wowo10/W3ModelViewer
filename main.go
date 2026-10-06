@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -25,7 +26,12 @@ func main() {
 	view := flag.Bool("view", false, "open the model viewer window")
 	verify := flag.Bool("verify", true, "cross-check idx entries against archive headers")
 	debug := flag.Bool("debug", false, "print debug output from the extract packages")
+	list := flag.Bool("list", false, "list every root file: path, size, content key (tab-separated); other output goes to stderr")
 	flag.Parse()
+
+	if *list {
+		out = os.Stderr
+	}
 
 	idxPackages.DEBUG = *debug
 	blte.DEBUG = *debug
@@ -43,7 +49,11 @@ func main() {
 	readEncoding(storage, encodingEntry, ckey)
 
 	findRootPackage(storage, config.GetRoot())
-	readRoot(storage, config.GetRoot())
+	r := readRoot(storage, config.GetRoot())
+
+	if *list {
+		listFiles(storage, r)
+	}
 
 	if *view {
 		runViewer()
@@ -156,6 +166,22 @@ func readRoot(storage *casc.Storage, ckey string) root.Root {
 	}
 
 	return r
+}
+
+// listFiles prints one line per root entry to stdout: path, size, content
+// key, tab-separated.
+func listFiles(storage *casc.Storage, r root.Root) {
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+
+	for _, entry := range r.Entries {
+		encEntry, exists := storage.LookupCKey(entry.CKey)
+		if !exists {
+			panic(fmt.Sprintf("Content key %x (%s) not found in encoding file", entry.CKey, entry.Path))
+		}
+
+		fmt.Fprintf(w, "%s\t%d\t%x\n", entry.Path, encEntry.Size, entry.CKey)
+	}
 }
 
 func decodeKey(key string) []byte {
