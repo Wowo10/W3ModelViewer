@@ -30,6 +30,7 @@ type Entry struct {
 	CKey        [16]byte // content key
 	Tag         string   // locale (enUS…) or platform (Windows, OSX); see package comment
 	InstallPath string   // where install files go on disk; "" for archive files
+	Variant     Variant  // edition and overlays derived from ModChain; see edition.go
 }
 
 // Root is the parsed root file, searchable by full path.
@@ -48,8 +49,17 @@ func ReadRoot(data []byte) Root {
 		byPath:  make(map[string]int, len(lines)),
 	}
 
+	variants := make(map[string]Variant) // one ParseModChain call per mod chain
+
 	for i, line := range lines {
 		entry := parseLine(strings.TrimSuffix(line, "\r"), i+1)
+
+		variant, cached := variants[entry.ModChain]
+		if !cached {
+			variant = ParseModChain(entry.ModChain)
+			variants[entry.ModChain] = variant
+		}
+		entry.Variant = variant
 
 		if _, exists := r.byPath[entry.Path]; exists {
 			panic(fmt.Sprintf("root: duplicate path %q on line %d", entry.Path, i+1))
