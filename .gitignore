@@ -1,3 +1,6 @@
 **/wardata/**
 imgui.ini
-.claude/
+.claude/*
+!.claude/skills/
+roadmap/
+scripts/
