@@ -10,8 +10,10 @@ import (
 	"modelView/extract/casc"
 	"modelView/extract/encoding"
 	"modelView/extract/idxPackages"
+	"modelView/extract/root"
 	"modelView/viewer"
 	"os"
+	"sort"
 )
 
 func main() {
@@ -36,6 +38,7 @@ func main() {
 	readEncoding(storage, encodingEntry, ckey)
 
 	findRootPackage(storage, config.GetRoot())
+	readRoot(storage, config.GetRoot())
 
 	if *view {
 		runViewer()
@@ -113,6 +116,41 @@ func findRootPackage(storage *casc.Storage, ckey string) idxPackages.IndexEntry 
 	fmt.Printf("Root key %x found in archive %d at offset %d with size %d\n", ekey[:9], packageEntry.Archive, packageEntry.Offset, packageEntry.Size)
 
 	return packageEntry
+}
+
+// readRoot reads and parses the root file, and prints the entry count and the
+// count per mod chain, largest first.
+func readRoot(storage *casc.Storage, ckey string) root.Root {
+	r := root.ReadRoot(storage.ReadByCKey([16]byte(decodeKey(ckey))))
+
+	fmt.Println("Root entries:", len(r.Entries))
+
+	counts := make(map[string]int)
+	for _, entry := range r.Entries {
+		counts[entry.ModChain]++
+	}
+
+	chains := make([]string, 0, len(counts))
+	for chain := range counts {
+		chains = append(chains, chain)
+	}
+	sort.Slice(chains, func(i, j int) bool {
+		if counts[chains[i]] != counts[chains[j]] {
+			return counts[chains[i]] > counts[chains[j]]
+		}
+		return chains[i] < chains[j]
+	})
+
+	fmt.Println("Root entries per mod chain:")
+	for _, chain := range chains {
+		name := chain
+		if name == "" {
+			name = "(none)"
+		}
+		fmt.Printf("  %5d %s\n", counts[chain], name)
+	}
+
+	return r
 }
 
 func decodeKey(key string) []byte {
