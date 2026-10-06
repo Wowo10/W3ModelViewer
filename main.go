@@ -33,11 +33,12 @@ func main() {
 	list := flag.Bool("list", false, "list every root file: path, size, content key, edition, overlays (tab-separated); other output goes to stderr")
 	filter := flag.String("filter", "", "with -list, only list files whose path inside the mod chain matches this glob; * and ? also match /")
 	edition := flag.String("edition", "", "with -list, only list files of this edition: classic, reforged, definitive or install")
+	variants := flag.String("variants", "", "print every edition/overlay version of this path without its mod chain (same format as -list); other output goes to stderr")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
 	flag.Parse()
 
-	if *list {
+	if *list || *variants != "" {
 		out = os.Stderr
 	}
 
@@ -65,6 +66,10 @@ func main() {
 
 	if *list {
 		listFiles(storage, r, *filter, *edition)
+	}
+
+	if *variants != "" {
+		printVariants(storage, r, *variants)
 	}
 
 	if *view {
@@ -208,6 +213,45 @@ func listFiles(storage *casc.Storage, r root.Root, glob, edition string) {
 
 		writeEntry(w, storage, entry)
 	}
+}
+
+// printVariants prints every entry whose Name matches name (case-
+// insensitively) via writeEntry, sorted by edition (classic, reforged,
+// definitive, install), then overlays, then path. It panics if name matches
+// nothing, like extractFile.
+func printVariants(storage *casc.Storage, r root.Root, name string) {
+	entries := r.Variants(name)
+	if len(entries) == 0 {
+		panic(fmt.Sprintf("No variants found for %q", name))
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		ei, ej := entries[i], entries[j]
+		if ei.Variant.Edition != ej.Variant.Edition {
+			return editionRank(ei.Variant.Edition) < editionRank(ej.Variant.Edition)
+		}
+		if ei.Variant.OverlayString() != ej.Variant.OverlayString() {
+			return ei.Variant.OverlayString() < ej.Variant.OverlayString()
+		}
+		return ei.Path < ej.Path
+	})
+
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+
+	for _, entry := range entries {
+		writeEntry(w, storage, entry)
+	}
+}
+
+// editionRank orders editions as classic, reforged, definitive, install.
+func editionRank(e root.Edition) int {
+	for i, known := range root.Editions {
+		if known == e {
+			return i
+		}
+	}
+	return len(root.Editions)
 }
 
 // validateEdition panics with the valid names if edition isn't one of them.

@@ -113,3 +113,17 @@ func (r Root) Lookup(path string) (Entry, bool) {
 	}
 	return r.Entries[idx], true
 }
+
+// Variants returns every entry whose Name (the path inside the mod chain)
+// equals name case-insensitively, in root order; the game's file system is
+// case-insensitive, and the same name can appear with different case in
+// different chains.
+func (r Root) Variants(name string) []Entry {
+	var variants []Entry
+	for _, entry := range r.Entries {
+		if strings.EqualFold(entry.Name, name) {
+			variants = append(variants, entry)
+		}
+	}
+	return variants
+}
