@@ -1,13 +1,13 @@
 package main
 
 import (
-	"crypto/md5"
 	"encoding/hex"
 	"flag"
 	"fmt"
 	"modelView/extract/blte"
 	"modelView/extract/buildConfig"
 	"modelView/extract/buildinfo"
+	"modelView/extract/casc"
 	"modelView/extract/encoding"
 	"modelView/extract/idxPackages"
 	"modelView/viewer"
@@ -29,12 +29,13 @@ func main() {
 	config := readBuildConfig(bInfo.GetBuildKey())
 	ckey, ekey := config.GetEncoding()
 
-	packages := idxPackages.ReadIdxPackages(*verify)
+	storage := casc.Open(*verify)
+	defer storage.Close()
 
-	encodingEntry := findEncodingPackage(packages, ekey)
-	enc := readEncoding(encodingEntry, ckey, *verify)
+	encodingEntry := findEncodingPackage(storage, ekey)
+	readEncoding(storage, encodingEntry, ckey)
 
-	findRootPackage(packages, enc, config.GetRoot())
+	findRootPackage(storage, config.GetRoot())
 
 	if *view {
 		runViewer()
@@ -75,48 +76,28 @@ func configPath(filename string) string {
 }
 
 // findEncodingPackage looks up the encoding file's location in the local idx packages.
-func findEncodingPackage(packages map[[9]byte]idxPackages.IndexEntry, ekey string) idxPackages.IndexEntry {
-	ekeyDecoded, err := hex.DecodeString(ekey)
-	if err != nil {
-		panic(err)
-	}
-	key := [9]byte(ekeyDecoded[:9])
+func findEncodingPackage(storage *casc.Storage, ekey string) idxPackages.IndexEntry {
+	ekeyDecoded := decodeKey(ekey)
 
-	packageEntry, exists := packages[key]
+	packageEntry, exists := storage.LookupEKey(ekeyDecoded)
 	if !exists {
-		panic(fmt.Sprintf("Encoding key %x not found in index packages", key))
+		panic(fmt.Sprintf("Encoding key %x not found in index packages", ekeyDecoded[:9]))
 	}
 
-	fmt.Printf("Encoding key %x found in archive %d at offset %d with size %d\n", key, packageEntry.Archive, packageEntry.Offset, packageEntry.Size)
+	fmt.Printf("Encoding key %x found in archive %d at offset %d with size %d\n", ekeyDecoded[:9], packageEntry.Archive, packageEntry.Offset, packageEntry.Size)
 
 	return packageEntry
 }
 
 // readEncoding decodes the encoding file. With verify set, its MD5 must match the content key.
-func readEncoding(entry idxPackages.IndexEntry, ckey string, verify bool) encoding.Encoding {
-	data := blte.Decode(idxPackages.ReadEntry(entry), verify)
-
-	if verify {
-		sum := md5.Sum(data)
-		if hex.EncodeToString(sum[:]) != ckey {
-			panic(fmt.Sprintf("Encoding MD5 mismatch: got %x, want %s", sum, ckey))
-		}
-	}
-
-	enc := encoding.ReadEncoding(data)
+func readEncoding(storage *casc.Storage, entry idxPackages.IndexEntry, ckey string) {
+	enc := storage.LoadEncoding(entry, [16]byte(decodeKey(ckey)))
 	fmt.Println("Encoding entries:", len(enc))
-
-	return enc
 }
 
 // findRootPackage resolves the root content key through the encoding file to its idx entry.
-func findRootPackage(packages map[[9]byte]idxPackages.IndexEntry, enc encoding.Encoding, ckey string) idxPackages.IndexEntry {
-	ckeyDecoded, err := hex.DecodeString(ckey)
-	if err != nil {
-		panic(err)
-	}
-
-	encEntry, exists := enc.Lookup([16]byte(ckeyDecoded))
+func findRootPackage(storage *casc.Storage, ckey string) idxPackages.IndexEntry {
+	encEntry, exists := storage.LookupCKey([16]byte(decodeKey(ckey)))
 	if !exists {
 		panic(fmt.Sprintf("Root key %s not found in encoding file", ckey))
 	}
@@ -124,15 +105,22 @@ func findRootPackage(packages map[[9]byte]idxPackages.IndexEntry, enc encoding.E
 	ekey := encEntry.EKeys[0]
 	fmt.Printf("Root key %s has encoding key %x, size %d\n", ckey, ekey, encEntry.Size)
 
-	key := [9]byte(ekey[:9])
-	packageEntry, exists := packages[key]
+	packageEntry, exists := storage.LookupEKey(ekey[:])
 	if !exists {
-		panic(fmt.Sprintf("Root encoding key %x not found in index packages", key))
+		panic(fmt.Sprintf("Root encoding key %x not found in index packages", ekey[:9]))
 	}
 
-	fmt.Printf("Root key %x found in archive %d at offset %d with size %d\n", key, packageEntry.Archive, packageEntry.Offset, packageEntry.Size)
+	fmt.Printf("Root key %x found in archive %d at offset %d with size %d\n", ekey[:9], packageEntry.Archive, packageEntry.Offset, packageEntry.Size)
 
 	return packageEntry
+}
+
+func decodeKey(key string) []byte {
+	decoded, err := hex.DecodeString(key)
+	if err != nil {
+		panic(err)
+	}
+	return decoded
 }
 
 func runViewer() {

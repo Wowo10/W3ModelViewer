@@ -47,13 +47,19 @@ type IndexEntry struct {
 	Size    uint32 // total bytes, including the 30-byte header
 }
 
+// Index maps the first 9 bytes of an encoding key to where its file is stored.
+type Index map[[keySize]byte]IndexEntry
+
+// Lookup finds an encoding key; only its first 9 bytes are stored in the index.
+func (i Index) Lookup(ekey []byte) (IndexEntry, bool) {
+	entry, ok := i[[keySize]byte(ekey[:keySize])]
+	return entry, ok
+}
+
 // ReadIdxPackages reads all local idx files. With verify set, every entry is
 // cross-checked against the header stored in its archive.
-func ReadIdxPackages(verify bool) (m map[[9]byte]IndexEntry) {
-	m = make(map[[9]byte]IndexEntry)
-
-	archives := make(archiveFiles)
-	defer archives.closeAll()
+func ReadIdxPackages(archives Archives, verify bool) (m Index) {
+	m = make(Index)
 
 	for _, filename := range filenames {
 		path := filepath.Join(dataPath, filename)
@@ -69,8 +75,8 @@ func ReadIdxPackages(verify bool) (m map[[9]byte]IndexEntry) {
 	return m
 }
 
-func readIdxPackage(path string, archives archiveFiles, verify bool) (m map[[9]byte]IndexEntry) {
-	m = make(map[[9]byte]IndexEntry)
+func readIdxPackage(path string, archives Archives, verify bool) (m Index) {
+	m = make(Index)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -130,7 +136,7 @@ func bucket(key [9]byte) byte {
 
 // verifyEntry cross-checks an index entry against the header stored in its archive.
 // It returns false for entries without a BLTE payload, which should be skipped.
-func verifyEntry(key [9]byte, entry IndexEntry, archives archiveFiles) bool {
+func verifyEntry(key [9]byte, entry IndexEntry, archives Archives) bool {
 	header := readArchiveHeader(archives.get(entry.Archive), entry)
 
 	if !checkMagic(header, entry) {
@@ -142,10 +148,11 @@ func verifyEntry(key [9]byte, entry IndexEntry, archives archiveFiles) bool {
 	return true
 }
 
-// archiveFiles keeps data.### files open so each archive is opened only once.
-type archiveFiles map[uint32]*os.File
+// Archives keeps data.### files open so each archive is opened only once.
+// The caller closes them with Close.
+type Archives map[uint32]*os.File
 
-func (a archiveFiles) get(archive uint32) *os.File {
+func (a Archives) get(archive uint32) *os.File {
 	if f, ok := a[archive]; ok {
 		return f
 	}
@@ -158,22 +165,16 @@ func (a archiveFiles) get(archive uint32) *os.File {
 	return f
 }
 
-func (a archiveFiles) closeAll() {
+func (a Archives) Close() {
 	for _, f := range a {
 		f.Close()
 	}
 }
 
 // ReadEntry reads an entry's payload from its archive, without the 30-byte header.
-func ReadEntry(entry IndexEntry) []byte {
-	f, err := os.Open(filepath.Join(dataPath, fmt.Sprintf("data.%03d", entry.Archive)))
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
+func (a Archives) ReadEntry(entry IndexEntry) []byte {
 	data := make([]byte, entry.Size-archiveHeaderSize)
-	if _, err := f.ReadAt(data, int64(entry.Offset)+archiveHeaderSize); err != nil {
+	if _, err := a.get(entry.Archive).ReadAt(data, int64(entry.Offset)+archiveHeaderSize); err != nil {
 		panic(err)
 	}
 
