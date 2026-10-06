@@ -15,7 +15,9 @@ import (
 	"modelView/extract/root"
 	"modelView/viewer"
 	"os"
+	"regexp"
 	"sort"
+	"strings"
 )
 
 // out is where startup output goes; stdout by default, stderr with -list so
@@ -27,6 +29,7 @@ func main() {
 	verify := flag.Bool("verify", true, "cross-check idx entries against archive headers")
 	debug := flag.Bool("debug", false, "print debug output from the extract packages")
 	list := flag.Bool("list", false, "list every root file: path, size, content key (tab-separated); other output goes to stderr")
+	filter := flag.String("filter", "", "with -list, only list files whose path inside the mod chain matches this glob; * and ? also match /")
 	flag.Parse()
 
 	if *list {
@@ -52,7 +55,7 @@ func main() {
 	r := readRoot(storage, config.GetRoot())
 
 	if *list {
-		listFiles(storage, r)
+		listFiles(storage, r, *filter)
 	}
 
 	if *view {
@@ -169,12 +172,22 @@ func readRoot(storage *casc.Storage, ckey string) root.Root {
 }
 
 // listFiles prints one line per root entry to stdout: path, size, content
-// key, tab-separated.
-func listFiles(storage *casc.Storage, r root.Root) {
+// key, tab-separated. With glob set, only entries whose Name (the path
+// inside the mod chain) matches it are printed.
+func listFiles(storage *casc.Storage, r root.Root, glob string) {
+	var re *regexp.Regexp
+	if glob != "" {
+		re = globRegexp(glob)
+	}
+
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
 
 	for _, entry := range r.Entries {
+		if re != nil && !re.MatchString(entry.Name) {
+			continue
+		}
+
 		encEntry, exists := storage.LookupCKey(entry.CKey)
 		if !exists {
 			panic(fmt.Sprintf("Content key %x (%s) not found in encoding file", entry.CKey, entry.Path))
@@ -182,6 +195,16 @@ func listFiles(storage *casc.Storage, r root.Root) {
 
 		fmt.Fprintf(w, "%s\t%d\t%x\n", entry.Path, encEntry.Size, entry.CKey)
 	}
+}
+
+// globRegexp compiles a shell-style glob into an anchored regexp, where *
+// matches any run of characters (including /) and ? matches any one
+// character.
+func globRegexp(glob string) *regexp.Regexp {
+	pattern := regexp.QuoteMeta(glob)
+	pattern = strings.ReplaceAll(pattern, `\*`, ".*")
+	pattern = strings.ReplaceAll(pattern, `\?`, ".")
+	return regexp.MustCompile("^" + pattern + "$")
 }
 
 func decodeKey(key string) []byte {
