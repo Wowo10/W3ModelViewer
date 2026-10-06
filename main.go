@@ -36,6 +36,7 @@ func main() {
 	variants := flag.String("variants", "", "print every edition/overlay version of this path without its mod chain (same format as -list); other output goes to stderr")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
+	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
 	flag.Parse()
 
 	if *list || *variants != "" {
@@ -70,6 +71,10 @@ func main() {
 
 	if *variants != "" {
 		printVariants(storage, r, *variants)
+	}
+
+	if *survey {
+		surveyFiles(storage, r)
 	}
 
 	if *view {
