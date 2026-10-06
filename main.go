@@ -30,7 +30,7 @@ func main() {
 	view := flag.Bool("view", false, "open the model viewer window")
 	verify := flag.Bool("verify", true, "cross-check idx entries against archive headers")
 	debug := flag.Bool("debug", false, "print debug output from the extract packages")
-	list := flag.Bool("list", false, "list every root file: path, size, content key (tab-separated); other output goes to stderr")
+	list := flag.Bool("list", false, "list every root file: path, size, content key, edition, overlays (tab-separated); other output goes to stderr")
 	filter := flag.String("filter", "", "with -list, only list files whose path inside the mod chain matches this glob; * and ? also match /")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
@@ -179,9 +179,9 @@ func readRoot(storage *casc.Storage, ckey string) root.Root {
 	return r
 }
 
-// listFiles prints one line per root entry to stdout: path, size, content
-// key, tab-separated. With glob set, only entries whose Name (the path
-// inside the mod chain) matches it are printed.
+// listFiles prints one line per root entry to stdout via writeEntry. With
+// glob set, only entries whose Name (the path inside the mod chain) matches
+// it are printed.
 func listFiles(storage *casc.Storage, r root.Root, glob string) {
 	var re *regexp.Regexp
 	if glob != "" {
@@ -196,13 +196,19 @@ func listFiles(storage *casc.Storage, r root.Root, glob string) {
 			continue
 		}
 
-		encEntry, exists := storage.LookupCKey(entry.CKey)
-		if !exists {
-			panic(fmt.Sprintf("Content key %x (%s) not found in encoding file", entry.CKey, entry.Path))
-		}
-
-		fmt.Fprintf(w, "%s\t%d\t%x\n", entry.Path, encEntry.Size, entry.CKey)
+		writeEntry(w, storage, entry)
 	}
+}
+
+// writeEntry prints one root entry: path, size, content key, edition,
+// overlays, tab-separated.
+func writeEntry(w io.Writer, storage *casc.Storage, entry root.Entry) {
+	encEntry, exists := storage.LookupCKey(entry.CKey)
+	if !exists {
+		panic(fmt.Sprintf("Content key %x (%s) not found in encoding file", entry.CKey, entry.Path))
+	}
+
+	fmt.Fprintf(w, "%s\t%d\t%x\t%s\t%s\n", entry.Path, encEntry.Size, entry.CKey, entry.Variant.Edition, entry.Variant.OverlayString())
 }
 
 // extractFile reads the root file at path and writes its decoded bytes to
