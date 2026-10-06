@@ -22,7 +22,8 @@ what is in flight, what is next, what is blocked and why.
 1. Read the existing epics and tasks so the new ones fit the order and don't
    duplicate anything. Read the code the idea touches.
 2. Ground the context in facts from `wardata` (counts, sizes, formats); probe
-   with throwaway programs in the scratchpad.
+   with throwaway programs in the scratchpad, never in the repo (see the
+   probe recipe in the `/plan` skill).
 3. Pick the epic, or create one: `roadmap/NN-<name>/EPIC.md` with a key in
    capitals, what it is for, and when it is done.
 4. One task = one plan → implement → review cycle. Ids are `<KEY>-NN`, next

@@ -33,7 +33,18 @@ mode the only files you may write are roadmap task files. If the task has no
   - `viewer` — SDL2 + OpenGL 3.2 + cimgui-go window.
 - `wardata/` is real game data (git-ignored). Use it to ground claims with
   numbers — file counts, sizes, entry counts — instead of estimating. Probe
-  with throwaway programs in the scratchpad, never in the repo.
+  with throwaway programs in the scratchpad, never in the repo (a stray
+  package there breaks `go vet ./...` and stops the loop). A probe that
+  imports this module's packages needs its own module:
+
+  ```sh
+  mkdir -p <scratchpad>/probe && cd <scratchpad>/probe
+  printf 'module probe\n\ngo 1.22\n\nrequire modelView v0.0.0\n\nreplace modelView => <repo root>\n' > go.mod
+  # write main.go importing modelView/extract/..., then:
+  go mod tidy && go build -o probe . && cd <repo root> && <scratchpad>/probe/probe
+  ```
+
+  Run it from the repo root so the relative `wardata/` paths resolve.
 
 ## 2. Respect the owner's constraints
 

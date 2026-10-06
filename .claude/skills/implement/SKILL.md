@@ -47,7 +47,8 @@ Implementation notes for work already done, and continue from there.
 ## Verify
 
 Run everything from the repo root. Use the session scratchpad directory for
-binaries, probes and output files, not `/tmp` or the repo.
+binaries, probes and output files, not `/tmp` or the repo (for a probe that
+imports this module, see the recipe in the `/plan` skill).
 
 1. `gofmt -l .` prints nothing, `go vet ./...` passes, `go build ./...` succeeds.
 2. Compare the program's output before and after the change:
