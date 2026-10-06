@@ -32,6 +32,7 @@ func main() {
 	debug := flag.Bool("debug", false, "print debug output from the extract packages")
 	list := flag.Bool("list", false, "list every root file: path, size, content key, edition, overlays (tab-separated); other output goes to stderr")
 	filter := flag.String("filter", "", "with -list, only list files whose path inside the mod chain matches this glob; * and ? also match /")
+	edition := flag.String("edition", "", "with -list, only list files of this edition: classic, reforged, definitive or install")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
 	flag.Parse()
@@ -63,7 +64,7 @@ func main() {
 	}
 
 	if *list {
-		listFiles(storage, r, *filter)
+		listFiles(storage, r, *filter, *edition)
 	}
 
 	if *view {
@@ -181,11 +182,17 @@ func readRoot(storage *casc.Storage, ckey string) root.Root {
 
 // listFiles prints one line per root entry to stdout via writeEntry. With
 // glob set, only entries whose Name (the path inside the mod chain) matches
-// it are printed.
-func listFiles(storage *casc.Storage, r root.Root, glob string) {
+// it are printed; with edition set, only entries of that edition (ANDed with
+// glob). Overlays are not filtered: -edition reforged includes _HD:_Teen and
+// _HD:_Locales/* entries.
+func listFiles(storage *casc.Storage, r root.Root, glob, edition string) {
 	var re *regexp.Regexp
 	if glob != "" {
 		re = globRegexp(glob)
+	}
+
+	if edition != "" {
+		validateEdition(edition)
 	}
 
 	w := bufio.NewWriter(os.Stdout)
@@ -195,9 +202,22 @@ func listFiles(storage *casc.Storage, r root.Root, glob string) {
 		if re != nil && !re.MatchString(entry.Name) {
 			continue
 		}
+		if edition != "" && string(entry.Variant.Edition) != edition {
+			continue
+		}
 
 		writeEntry(w, storage, entry)
 	}
+}
+
+// validateEdition panics with the valid names if edition isn't one of them.
+func validateEdition(edition string) {
+	for _, e := range root.Editions {
+		if string(e) == edition {
+			return
+		}
+	}
+	panic(fmt.Sprintf("Unknown edition %q, want one of %v", edition, root.Editions))
 }
 
 // writeEntry prints one root entry: path, size, content key, edition,
