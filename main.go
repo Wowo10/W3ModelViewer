@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"modelView/extract/root"
 	"modelView/viewer"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -30,6 +32,8 @@ func main() {
 	debug := flag.Bool("debug", false, "print debug output from the extract packages")
 	list := flag.Bool("list", false, "list every root file: path, size, content key (tab-separated); other output goes to stderr")
 	filter := flag.String("filter", "", "with -list, only list files whose path inside the mod chain matches this glob; * and ? also match /")
+	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
+	outDir := flag.String("out", ".", "directory to extract into, with -extract")
 	flag.Parse()
 
 	if *list {
@@ -53,6 +57,10 @@ func main() {
 
 	findRootPackage(storage, config.GetRoot())
 	r := readRoot(storage, config.GetRoot())
+
+	if *extract != "" {
+		extractFile(storage, r, *extract, *outDir)
+	}
 
 	if *list {
 		listFiles(storage, r, *filter)
@@ -195,6 +203,41 @@ func listFiles(storage *casc.Storage, r root.Root, glob string) {
 
 		fmt.Fprintf(w, "%s\t%d\t%x\n", entry.Path, encEntry.Size, entry.CKey)
 	}
+}
+
+// extractFile reads the root file at path and writes its decoded bytes to
+// dir, under its name inside the mod chain. It reports when the data starts
+// with MDLX (a model).
+func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
+	entry, exists := r.Lookup(path)
+	if !exists {
+		panic(fmt.Sprintf("Path %q not found in root", path))
+	}
+
+	encEntry, exists := storage.LookupCKey(entry.CKey)
+	if !exists {
+		panic(fmt.Sprintf("Content key %x not found in encoding file", entry.CKey))
+	}
+	ekey := encEntry.EKeys[0]
+	if _, exists := storage.LookupEKey(ekey[:]); !exists {
+		panic(fmt.Sprintf("%s (content key %x) is not stored locally: encoding key %x not in any idx", path, entry.CKey, ekey))
+	}
+
+	data := storage.ReadByCKey(entry.CKey)
+
+	dest := filepath.Join(dir, filepath.FromSlash(entry.Name))
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		panic(err)
+	}
+
+	model := ""
+	if bytes.HasPrefix(data, []byte("MDLX")) {
+		model = ", model"
+	}
+	fmt.Fprintf(out, "Extracted %s (%d bytes%s) to %s\n", path, len(data), model, dest)
 }
 
 // globRegexp compiles a shell-style glob into an anchored regexp, where *
