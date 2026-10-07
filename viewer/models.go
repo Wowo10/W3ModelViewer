@@ -20,18 +20,22 @@ type modelEntry struct {
 // selectedModel is the parsed model shown in the "Model" window.
 type selectedModel struct {
 	path    string
+	name    string // entry.Name, used to find other editions of this asset
 	version uint32
 	chunks  int
 	geosets []mdx.Geoset
 }
 
 // modelPicker lists every .mdx root entry with a text filter and an edition
-// selector, and holds the currently selected model's parsed data.
+// selector, and holds the currently selected model's parsed data and its
+// group of editions.
 type modelPicker struct {
 	storage *casc.Storage
+	root    root.Root
 
 	models   []modelEntry
-	editions []string // "all" followed by every edition that has a model
+	byPath   map[string]int // models[byPath[path]].entry.Path == path
+	editions []string       // "all" followed by every edition that has a model
 
 	filter   string
 	edition  int32
@@ -40,12 +44,15 @@ type modelPicker struct {
 
 	loaded int // index into models of the model currently in model, -1 = none
 	model  selectedModel
+
+	groupName string // entry.Name the current group was computed for
+	group     []int  // indices into models of every edition of groupName, sorted
 }
 
 // newModelPicker collects every root entry whose Name ends in ".mdx" (case-
 // insensitive), sorted by Path, and the editions present among them.
 func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
-	p := &modelPicker{storage: storage, selected: -1, loaded: -1}
+	p := &modelPicker{storage: storage, root: r, selected: -1, loaded: -1}
 
 	seen := map[root.Edition]bool{}
 	for _, entry := range r.Entries {
@@ -57,6 +64,11 @@ func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
 	}
 
 	sort.Slice(p.models, func(i, j int) bool { return p.models[i].entry.Path < p.models[j].entry.Path })
+
+	p.byPath = make(map[string]int, len(p.models))
+	for i, m := range p.models {
+		p.byPath[m.entry.Path] = i
+	}
 
 	p.editions = []string{"all"}
 	for _, e := range root.Editions {
@@ -95,11 +107,43 @@ func (p *modelPicker) loadModel(idx int) {
 
 	p.model = selectedModel{
 		path:    entry.Path,
+		name:    entry.Name,
 		version: m.Version,
 		chunks:  len(m.Chunks),
 		geosets: m.Geosets(),
 	}
 	p.loaded = idx
+}
+
+// loadGroup recomputes group as every edition of models[idx]'s asset,
+// sorted like -variants, when the asset's name (case-insensitively) differs
+// from the group already held.
+func (p *modelPicker) loadGroup(idx int) {
+	name := p.models[idx].entry.Name
+	if strings.EqualFold(name, p.groupName) {
+		return
+	}
+
+	variants := p.root.Variants(name)
+	root.SortVariants(variants)
+
+	group := make([]int, len(variants))
+	for i, v := range variants {
+		group[i] = p.byPath[v.Path]
+	}
+
+	p.group = group
+	p.groupName = name
+}
+
+// variantLabel names an edition radio button, e.g. "classic" or
+// "reforged (teen)".
+func variantLabel(entry root.Entry) string {
+	label := string(entry.Variant.Edition)
+	if overlays := entry.Variant.OverlayString(); overlays != "" {
+		label += " (" + overlays + ")"
+	}
+	return label
 }
 
 // draw shows the "Models" window: a filter box, an edition combo and a
@@ -138,6 +182,7 @@ func (p *modelPicker) draw() {
 
 	if p.selected != -1 && p.selected != p.loaded {
 		p.loadModel(p.selected)
+		p.loadGroup(p.selected)
 	}
 
 	p.drawModel()
@@ -155,6 +200,20 @@ func (p *modelPicker) drawModel() {
 		} else {
 			m := p.model
 			imgui.TextUnformatted(m.path)
+
+			if len(p.group) > 1 {
+				imgui.Text("Editions:")
+				for i, idx := range p.group {
+					if i > 0 {
+						imgui.SameLine()
+					}
+					entry := p.models[idx].entry
+					if imgui.RadioButtonBool(variantLabel(entry)+"##"+entry.Path, idx == p.selected) {
+						p.selected = idx
+					}
+				}
+			}
+
 			imgui.Text(fmt.Sprintf("Version: %d", m.version))
 			imgui.Text(fmt.Sprintf("Chunks: %d", m.chunks))
 			imgui.Text(fmt.Sprintf("Geosets: %d", len(m.geosets)))
