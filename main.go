@@ -37,7 +37,7 @@ func main() {
 	variants := flag.String("variants", "", "print every edition/overlay version of this path without its mod chain (same format as -list); other output goes to stderr")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
-	mdxinfo := flag.String("mdxinfo", "", "print the MDX version and chunk list (tag, size) of the model at this full path (including mod chain); other output goes to stderr")
+	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size) and geoset vertex and triangle counts of the model at this full path (including mod chain); other output goes to stderr")
 	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
 	flag.Parse()
 
@@ -326,8 +326,9 @@ func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
 	fmt.Fprintf(out, "Extracted %s (%d bytes%s) to %s\n", path, len(data), model, dest)
 }
 
-// printMDXInfo reads the MDX model at path and prints its version and chunk
-// list (tag, size, in file order) to stdout.
+// printMDXInfo reads the MDX model at path and prints its version, chunk
+// list (tag, size, in file order) and geoset vertex/triangle counts to
+// stdout.
 func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 	_, data := readFile(storage, r, path)
 	model := mdx.Read(data)
@@ -341,6 +342,21 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 	for _, chunk := range model.Chunks {
 		fmt.Fprintf(w, "  %-4s %9d\n", chunk.Tag, len(chunk.Data))
 	}
+
+	geosets := model.Geosets()
+	fmt.Fprintln(w, "Geosets:", len(geosets))
+	if len(geosets) == 0 {
+		return
+	}
+
+	fmt.Fprintf(w, "  %6s %8s %3s %9s %9s\n", "geoset", "material", "lod", "vertices", "triangles")
+	var totalVertices, totalTriangles int
+	for i, g := range geosets {
+		fmt.Fprintf(w, "  %6d %8d %3d %9d %9d\n", i, g.MaterialID, g.LOD, g.VertexCount(), g.TriangleCount())
+		totalVertices += g.VertexCount()
+		totalTriangles += g.TriangleCount()
+	}
+	fmt.Fprintf(w, "  %-19s %9d %9d\n", "total", totalVertices, totalTriangles)
 }
 
 // globRegexp compiles a shell-style glob into an anchored regexp, where *
