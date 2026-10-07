@@ -78,6 +78,7 @@ func Run(cfg Config, storage *casc.Storage, r root.Root) error {
 	defer opengl3.Shutdown()
 
 	ui := newUIState(storage, r)
+	defer ui.release()
 
 	for !ui.quit {
 		pollEvents(window, ui)
@@ -161,6 +162,18 @@ func pollEvents(window *sdl.Window, ui *uiState) {
 			if e.Event == sdl.WINDOWEVENT_CLOSE && e.WindowID == windowID(window) {
 				ui.quit = true
 			}
+		case *sdl.MouseMotionEvent:
+			if !imgui.CurrentIO().WantCaptureMouse() && e.State&sdl.ButtonLMask() != 0 {
+				ui.camera.rotate(float32(e.XRel), float32(e.YRel))
+			}
+		case *sdl.MouseWheelEvent:
+			if !imgui.CurrentIO().WantCaptureMouse() {
+				steps := e.PreciseY
+				if steps == 0 {
+					steps = float32(e.Y)
+				}
+				ui.camera.zoom(steps)
+			}
 		}
 	}
 }
@@ -171,6 +184,7 @@ func renderFrame(window *sdl.Window, ui *uiState) {
 	imgui.NewFrame()
 
 	ui.draw()
+	ui.syncMesh()
 
 	imgui.Render()
 
@@ -178,6 +192,12 @@ func renderFrame(window *sdl.Window, ui *uiState) {
 	gl.Viewport(0, 0, w, h)
 	gl.ClearColor(ui.clearColor[0], ui.clearColor[1], ui.clearColor[2], 1)
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+
+	if h > 0 && len(ui.mesh.geosets) > 0 {
+		view, proj := ui.camera.matrices(float32(w) / float32(h))
+		ui.mesh.draw(ui.program, view, proj)
+	}
+
 	opengl3.RenderDrawData(imgui.CurrentDrawData())
 
 	window.GLSwap()

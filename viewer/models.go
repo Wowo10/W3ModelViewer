@@ -160,6 +160,17 @@ func (p *modelPicker) drawModel() {
 			imgui.Text(fmt.Sprintf("Geosets: %d", len(m.geosets)))
 
 			if len(m.geosets) > 0 {
+				lod := lowestLOD(m.geosets)
+				drawn := 0
+				for _, g := range m.geosets {
+					if g.LOD == lod {
+						drawn++
+					}
+				}
+				imgui.Text(fmt.Sprintf("Rendering LOD %d (%d of %d geosets)", lod, drawn, len(m.geosets)))
+			}
+
+			if len(m.geosets) > 0 {
 				imgui.Separator()
 				if imgui.BeginTableV("##geosets", 5, imgui.TableFlagsScrollY|imgui.TableFlagsRowBg|imgui.TableFlagsBorders, imgui.Vec2{}, 0) {
 					imgui.TableSetupColumn("geoset")

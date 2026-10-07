@@ -17,6 +17,11 @@ type uiState struct {
 	showDemo   bool
 	clearColor [3]float32
 	scale      float32
+
+	program *meshProgram
+	mesh    modelMesh
+	meshFor int // index into models of the model mesh was built from, -1 = none
+	camera  orbitCamera
 }
 
 func newUIState(storage *casc.Storage, r root.Root) *uiState {
@@ -26,7 +31,32 @@ func newUIState(storage *casc.Storage, r root.Root) *uiState {
 		models:     newModelPicker(storage, r),
 		clearColor: [3]float32{0.10, 0.11, 0.13},
 		scale:      1.0,
+		program:    newMeshProgram(),
+		meshFor:    -1,
 	}
+}
+
+// syncMesh uploads the currently loaded model's geosets when the picker has
+// loaded a different model than the mesh was built from, releasing the
+// previous mesh first.
+func (ui *uiState) syncMesh() {
+	if ui.models.loaded == ui.meshFor {
+		return
+	}
+
+	ui.mesh.release()
+	ui.mesh = uploadMesh(ui.models.model.geosets)
+	if len(ui.mesh.geosets) > 0 {
+		ui.camera.frame(ui.mesh.min, ui.mesh.max)
+	}
+	ui.meshFor = ui.models.loaded
+}
+
+// release frees the GL resources held by the UI. Call it while the GL
+// context is still current.
+func (ui *uiState) release() {
+	ui.mesh.release()
+	ui.program.release()
 }
 
 func (ui *uiState) draw() {
