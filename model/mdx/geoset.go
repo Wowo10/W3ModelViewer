@@ -153,9 +153,9 @@ func readGeoset(data []byte, start int, index int) (Geoset, int) {
 		}
 	}
 
-	sets := r.u32()
+	sets := r.subchunk("UVAS")
 	g.UVs = make([][]float32, sets)
-	for i := uint32(0); i < sets; i++ {
+	for i := 0; i < sets; i++ {
 		n = r.subchunk("UVBS")
 		g.UVs[i] = r.float32s(2 * n)
 	}
