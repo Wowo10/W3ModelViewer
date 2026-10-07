@@ -81,7 +81,7 @@ func (m Model) Geosets() []Geoset {
 // readGeoset parses one geoset starting at pos in data and returns it along
 // with its size in bytes (the inclusive size field).
 func readGeoset(data []byte, start int, index int) (Geoset, int) {
-	r := geosReader{data: data, pos: start, geoset: index}
+	r := geosReader{data: data, pos: start, limit: len(data), geoset: index}
 
 	size := r.u32()
 	end := start + int(size)
