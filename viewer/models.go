@@ -243,7 +243,8 @@ func (p *modelPicker) draw() {
 // with a row per count: version, geosets, LODs, rendered LOD, vertices and
 // triangles at the rendered LOD, and total vertices and triangles.
 func (p *modelPicker) drawEditionsTable() {
-	if !imgui.BeginTableV("##editions", int32(1+len(p.group)), imgui.TableFlagsBorders|imgui.TableFlagsRowBg, imgui.Vec2{}, 0) {
+	id := fmt.Sprintf("##editions-%s", p.groupName)
+	if !imgui.BeginTableV(id, int32(1+len(p.group)), imgui.TableFlagsBorders|imgui.TableFlagsRowBg, imgui.Vec2{}, 0) {
 		return
 	}
 	defer imgui.EndTable()
@@ -258,29 +259,36 @@ func (p *modelPicker) drawEditionsTable() {
 	}
 	imgui.TableHeadersRow()
 
-	rows := []struct {
-		label string
-		value func(modelCounts) int
-	}{
-		{"version", func(c modelCounts) int { return int(c.version) }},
-		{"geosets", func(c modelCounts) int { return c.geosets }},
-		{"LODs", func(c modelCounts) int { return c.lods }},
-		{"rendered LOD", func(c modelCounts) int { return int(c.lod) }},
-		{"LOD vertices", func(c modelCounts) int { return c.lodVertices }},
-		{"LOD triangles", func(c modelCounts) int { return c.lodTriangles }},
-		{"total vertices", func(c modelCounts) int { return c.vertices }},
-		{"total triangles", func(c modelCounts) int { return c.triangles }},
-	}
-
-	for _, row := range rows {
+	for _, row := range editionsTableRows {
 		imgui.TableNextRow()
 		imgui.TableNextColumn()
 		imgui.TextUnformatted(row.label)
 		for _, idx := range p.group {
 			imgui.TableNextColumn()
-			imgui.Text(fmt.Sprintf("%d", row.value(p.counts[p.models[idx].entry.CKey])))
+			imgui.TextUnformatted(row.value(p.counts[p.models[idx].entry.CKey]))
 		}
 	}
+}
+
+// editionsTableRows are the rows of drawEditionsTable, built once since they
+// hold no per-frame state.
+var editionsTableRows = []struct {
+	label string
+	value func(modelCounts) string
+}{
+	{"version", func(c modelCounts) string { return fmt.Sprintf("%d", c.version) }},
+	{"geosets", func(c modelCounts) string { return fmt.Sprintf("%d", c.geosets) }},
+	{"LODs", func(c modelCounts) string { return fmt.Sprintf("%d", c.lods) }},
+	{"rendered LOD", func(c modelCounts) string {
+		if c.geosets == 0 {
+			return "-"
+		}
+		return fmt.Sprintf("%d", c.lod)
+	}},
+	{"LOD vertices", func(c modelCounts) string { return fmt.Sprintf("%d", c.lodVertices) }},
+	{"LOD triangles", func(c modelCounts) string { return fmt.Sprintf("%d", c.lodTriangles) }},
+	{"total vertices", func(c modelCounts) string { return fmt.Sprintf("%d", c.vertices) }},
+	{"total triangles", func(c modelCounts) string { return fmt.Sprintf("%d", c.triangles) }},
 }
 
 // drawModel shows the "Model" window: the selected model's path, version,
@@ -313,7 +321,7 @@ func (p *modelPicker) drawModel() {
 			imgui.Text(fmt.Sprintf("Chunks: %d", m.chunks))
 			imgui.Text(fmt.Sprintf("Geosets: %d", len(m.geosets)))
 
-			if len(p.group) > 0 {
+			if len(p.group) > 1 {
 				imgui.Separator()
 				p.drawEditionsTable()
 			}
