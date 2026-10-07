@@ -291,6 +291,18 @@ var editionsTableRows = []struct {
 	{"total triangles", func(c modelCounts) string { return fmt.Sprintf("%d", c.triangles) }},
 }
 
+// drawFPS writes the frame rate right-aligned on the current line and puts
+// the cursor back, so the window's content starts on that same line.
+func drawFPS() {
+	fr := imgui.CurrentIO().Framerate()
+	text := fmt.Sprintf("%.0f FPS (%.1f ms)", fr, 1000/fr)
+
+	pos := imgui.CursorPos()
+	imgui.SetCursorPos(imgui.Vec2{X: pos.X + imgui.ContentRegionAvail().X - imgui.CalcTextSize(text).X, Y: pos.Y})
+	imgui.TextDisabled(text)
+	imgui.SetCursorPos(pos)
+}
+
 // drawModel shows the "Model" window: the selected model's path, version,
 // chunk count and a geoset/material/lod/vertices/triangles table with a
 // total row, mirroring -mdxinfo.
@@ -298,6 +310,8 @@ func (p *modelPicker) drawModel() {
 	imgui.SetNextWindowPosV(imgui.Vec2{X: 500, Y: 10}, imgui.CondFirstUseEver, imgui.Vec2{})
 	imgui.SetNextWindowSizeV(imgui.Vec2{X: 560, Y: 440}, imgui.CondFirstUseEver)
 	if imgui.Begin("Model") {
+		drawFPS()
+
 		if p.loaded == -1 {
 			imgui.Text("Select a model")
 		} else {
