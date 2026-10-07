@@ -236,16 +236,7 @@ func printVariants(storage *casc.Storage, r root.Root, name string) {
 		panic(fmt.Sprintf("No variants found for %q", name))
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		ei, ej := entries[i], entries[j]
-		if ei.Variant.Edition != ej.Variant.Edition {
-			return editionRank(ei.Variant.Edition) < editionRank(ej.Variant.Edition)
-		}
-		if ei.Variant.OverlayString() != ej.Variant.OverlayString() {
-			return ei.Variant.OverlayString() < ej.Variant.OverlayString()
-		}
-		return ei.Path < ej.Path
-	})
+	root.SortVariants(entries)
 
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
@@ -253,16 +244,6 @@ func printVariants(storage *casc.Storage, r root.Root, name string) {
 	for _, entry := range entries {
 		writeEntry(w, storage, entry)
 	}
-}
-
-// editionRank orders editions as classic, reforged, definitive, install.
-func editionRank(e root.Edition) int {
-	for i, known := range root.Editions {
-		if known == e {
-			return i
-		}
-	}
-	return len(root.Editions)
 }
 
 // validateEdition panics with the valid names if edition isn't one of them.

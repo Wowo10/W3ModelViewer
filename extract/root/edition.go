@@ -1,6 +1,9 @@
 package root
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // Edition is the top-level graphics layer a file belongs to.
 type Edition string
@@ -76,6 +79,32 @@ func ParseModChain(chain string) Variant {
 	}
 
 	return v
+}
+
+// SortVariants sorts entries by edition (classic, reforged, definitive,
+// install), then overlays, then path, as used by -variants and the viewer's
+// edition switcher.
+func SortVariants(entries []Entry) {
+	sort.Slice(entries, func(i, j int) bool {
+		ei, ej := entries[i], entries[j]
+		if ei.Variant.Edition != ej.Variant.Edition {
+			return editionRank(ei.Variant.Edition) < editionRank(ej.Variant.Edition)
+		}
+		if ei.Variant.OverlayString() != ej.Variant.OverlayString() {
+			return ei.Variant.OverlayString() < ej.Variant.OverlayString()
+		}
+		return ei.Path < ej.Path
+	})
+}
+
+// editionRank orders editions as classic, reforged, definitive, install.
+func editionRank(e Edition) int {
+	for i, known := range Editions {
+		if known == e {
+			return i
+		}
+	}
+	return len(Editions)
 }
 
 // splitSegment splits a mod chain segment at its last '/' into dir and base,
