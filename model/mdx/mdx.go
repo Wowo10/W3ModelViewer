@@ -4,6 +4,8 @@
 // back to back to EOF: a 4-byte ASCII tag, a uint32 LE size, then that many
 // bytes of chunk data. The first chunk is always "VERS", a 4-byte uint32 LE
 // version number.
+//
+// Model.Geosets parses the GEOS chunk; see its doc comment for the layout.
 package mdx
 
 import (
