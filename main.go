@@ -14,6 +14,7 @@ import (
 	"modelView/extract/encoding"
 	"modelView/extract/idxPackages"
 	"modelView/extract/root"
+	"modelView/model/mdx"
 	"modelView/viewer"
 	"os"
 	"path/filepath"
@@ -36,10 +37,11 @@ func main() {
 	variants := flag.String("variants", "", "print every edition/overlay version of this path without its mod chain (same format as -list); other output goes to stderr")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
+	mdxinfo := flag.String("mdxinfo", "", "print the MDX version and chunk list (tag, size) of the model at this full path (including mod chain); other output goes to stderr")
 	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
 	flag.Parse()
 
-	if *list || *variants != "" {
+	if *list || *variants != "" || *mdxinfo != "" {
 		out = os.Stderr
 	}
 
@@ -71,6 +73,10 @@ func main() {
 
 	if *variants != "" {
 		printVariants(storage, r, *variants)
+	}
+
+	if *mdxinfo != "" {
+		printMDXInfo(storage, r, *mdxinfo)
 	}
 
 	if *survey {
@@ -318,6 +324,23 @@ func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
 		model = ", model"
 	}
 	fmt.Fprintf(out, "Extracted %s (%d bytes%s) to %s\n", path, len(data), model, dest)
+}
+
+// printMDXInfo reads the MDX model at path and prints its version and chunk
+// list (tag, size, in file order) to stdout.
+func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
+	_, data := readFile(storage, r, path)
+	model := mdx.Read(data)
+
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+
+	fmt.Fprintln(w, path)
+	fmt.Fprintln(w, "Version:", model.Version)
+	fmt.Fprintln(w, "Chunks:", len(model.Chunks))
+	for _, chunk := range model.Chunks {
+		fmt.Fprintf(w, "  %-4s %9d\n", chunk.Tag, len(chunk.Data))
+	}
 }
 
 // globRegexp compiles a shell-style glob into an anchored regexp, where *
