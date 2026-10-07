@@ -12,6 +12,8 @@ import (
 	"github.com/AllenDang/cimgui-go/impl/sdl2"
 	"github.com/go-gl/gl/v3.2-core/gl"
 	"github.com/veandco/go-sdl2/sdl"
+	"modelView/extract/casc"
+	"modelView/extract/root"
 )
 
 // Config describes the window to open.
@@ -29,8 +31,9 @@ func DefaultConfig() Config {
 // glslVersion matches the 3.2 core profile requested below.
 const glslVersion = "#version 150"
 
-// Run opens the window and pumps events until the user closes it.
-func Run(cfg Config) error {
+// Run opens the window and pumps events until the user closes it. storage and
+// r let the UI read model files; the viewer does no file I/O of its own.
+func Run(cfg Config, storage *casc.Storage, r root.Root) error {
 	// The GL context is bound to one OS thread, so this goroutine must stay put.
 	runtime.LockOSThread()
 
@@ -74,7 +77,7 @@ func Run(cfg Config) error {
 	}
 	defer opengl3.Shutdown()
 
-	ui := newUIState()
+	ui := newUIState(storage, r)
 
 	for !ui.quit {
 		pollEvents(window, ui)

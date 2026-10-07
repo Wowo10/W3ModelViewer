@@ -4,18 +4,24 @@ import (
 	"fmt"
 
 	"github.com/AllenDang/cimgui-go/imgui"
+	"modelView/extract/casc"
+	"modelView/extract/root"
 )
 
 // uiState keeps whatever the panels need between frames.
 type uiState struct {
+	storage    *casc.Storage
+	root       root.Root
 	quit       bool
 	showDemo   bool
 	clearColor [3]float32
 	scale      float32
 }
 
-func newUIState() *uiState {
+func newUIState(storage *casc.Storage, r root.Root) *uiState {
 	return &uiState{
+		storage:    storage,
+		root:       r,
 		clearColor: [3]float32{0.10, 0.11, 0.13},
 		scale:      1.0,
 	}

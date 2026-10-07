@@ -84,7 +84,7 @@ func main() {
 	}
 
 	if *view {
-		runViewer()
+		runViewer(storage, r)
 	}
 }
 
@@ -392,8 +392,8 @@ func decodeKey(key string) []byte {
 	return decoded
 }
 
-func runViewer() {
-	if err := viewer.Run(viewer.DefaultConfig()); err != nil {
+func runViewer(storage *casc.Storage, r root.Root) {
+	if err := viewer.Run(viewer.DefaultConfig(), storage, r); err != nil {
 		fmt.Fprintln(os.Stderr, "viewer:", err)
 		os.Exit(1)
 	}
