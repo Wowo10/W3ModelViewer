@@ -47,12 +47,46 @@ type modelPicker struct {
 
 	groupName string // entry.Name the current group was computed for
 	group     []int  // indices into models of every edition of groupName, sorted
+
+	counts map[[16]byte]modelCounts // by content key, filled as editions are seen
+}
+
+// modelCounts summarizes one edition's geometry for the side-by-side
+// editions table.
+type modelCounts struct {
+	version                   uint32
+	geosets, lods             int
+	lod                       uint32
+	lodVertices, lodTriangles int
+	vertices, triangles       int
+}
+
+// countGeosets computes modelCounts for a model's version and geosets.
+func countGeosets(version uint32, geosets []mdx.Geoset) modelCounts {
+	c := modelCounts{version: version, geosets: len(geosets)}
+	if len(geosets) == 0 {
+		return c
+	}
+
+	lods := map[uint32]bool{}
+	c.lod = lowestLOD(geosets)
+	for _, g := range geosets {
+		lods[g.LOD] = true
+		c.vertices += g.VertexCount()
+		c.triangles += g.TriangleCount()
+		if g.LOD == c.lod {
+			c.lodVertices += g.VertexCount()
+			c.lodTriangles += g.TriangleCount()
+		}
+	}
+	c.lods = len(lods)
+	return c
 }
 
 // newModelPicker collects every root entry whose Name ends in ".mdx" (case-
 // insensitive), sorted by Path, and the editions present among them.
 func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
-	p := &modelPicker{storage: storage, root: r, selected: -1, loaded: -1}
+	p := &modelPicker{storage: storage, root: r, selected: -1, loaded: -1, counts: map[[16]byte]modelCounts{}}
 
 	seen := map[root.Edition]bool{}
 	for _, entry := range r.Entries {
@@ -104,15 +138,17 @@ func (p *modelPicker) loadModel(idx int) {
 	entry := p.models[idx].entry
 	data := p.storage.ReadByCKey(entry.CKey)
 	m := mdx.Read(data)
+	geosets := m.Geosets()
 
 	p.model = selectedModel{
 		path:    entry.Path,
 		name:    entry.Name,
 		version: m.Version,
 		chunks:  len(m.Chunks),
-		geosets: m.Geosets(),
+		geosets: geosets,
 	}
 	p.loaded = idx
+	p.counts[entry.CKey] = countGeosets(m.Version, geosets)
 }
 
 // loadGroup recomputes group as every edition of models[idx]'s asset,
@@ -130,10 +166,24 @@ func (p *modelPicker) loadGroup(idx int) {
 	group := make([]int, len(variants))
 	for i, v := range variants {
 		group[i] = p.byPath[v.Path]
+		p.countEdition(group[i])
 	}
 
 	p.group = group
 	p.groupName = name
+}
+
+// countEdition fills counts for models[idx]'s content key if it isn't
+// already cached, reading and parsing the model if necessary.
+func (p *modelPicker) countEdition(idx int) {
+	entry := p.models[idx].entry
+	if _, ok := p.counts[entry.CKey]; ok {
+		return
+	}
+
+	data := p.storage.ReadByCKey(entry.CKey)
+	m := mdx.Read(data)
+	p.counts[entry.CKey] = countGeosets(m.Version, m.Geosets())
 }
 
 // variantLabel names an edition radio button, e.g. "classic" or
@@ -188,12 +238,57 @@ func (p *modelPicker) draw() {
 	p.drawModel()
 }
 
+// drawEditionsTable shows counts for every edition in p.group side by side,
+// one column per edition (the selected edition's header marked with "*"),
+// with a row per count: version, geosets, LODs, rendered LOD, vertices and
+// triangles at the rendered LOD, and total vertices and triangles.
+func (p *modelPicker) drawEditionsTable() {
+	if !imgui.BeginTableV("##editions", int32(1+len(p.group)), imgui.TableFlagsBorders|imgui.TableFlagsRowBg, imgui.Vec2{}, 0) {
+		return
+	}
+	defer imgui.EndTable()
+
+	imgui.TableSetupColumn("")
+	for _, idx := range p.group {
+		header := variantLabel(p.models[idx].entry)
+		if idx == p.selected {
+			header += " *"
+		}
+		imgui.TableSetupColumn(header)
+	}
+	imgui.TableHeadersRow()
+
+	rows := []struct {
+		label string
+		value func(modelCounts) int
+	}{
+		{"version", func(c modelCounts) int { return int(c.version) }},
+		{"geosets", func(c modelCounts) int { return c.geosets }},
+		{"LODs", func(c modelCounts) int { return c.lods }},
+		{"rendered LOD", func(c modelCounts) int { return int(c.lod) }},
+		{"LOD vertices", func(c modelCounts) int { return c.lodVertices }},
+		{"LOD triangles", func(c modelCounts) int { return c.lodTriangles }},
+		{"total vertices", func(c modelCounts) int { return c.vertices }},
+		{"total triangles", func(c modelCounts) int { return c.triangles }},
+	}
+
+	for _, row := range rows {
+		imgui.TableNextRow()
+		imgui.TableNextColumn()
+		imgui.TextUnformatted(row.label)
+		for _, idx := range p.group {
+			imgui.TableNextColumn()
+			imgui.Text(fmt.Sprintf("%d", row.value(p.counts[p.models[idx].entry.CKey])))
+		}
+	}
+}
+
 // drawModel shows the "Model" window: the selected model's path, version,
 // chunk count and a geoset/material/lod/vertices/triangles table with a
 // total row, mirroring -mdxinfo.
 func (p *modelPicker) drawModel() {
 	imgui.SetNextWindowPosV(imgui.Vec2{X: 500, Y: 270}, imgui.CondFirstUseEver, imgui.Vec2{})
-	imgui.SetNextWindowSizeV(imgui.Vec2{X: 420, Y: 400}, imgui.CondFirstUseEver)
+	imgui.SetNextWindowSizeV(imgui.Vec2{X: 560, Y: 440}, imgui.CondFirstUseEver)
 	if imgui.Begin("Model") {
 		if p.loaded == -1 {
 			imgui.Text("Select a model")
@@ -217,6 +312,11 @@ func (p *modelPicker) drawModel() {
 			imgui.Text(fmt.Sprintf("Version: %d", m.version))
 			imgui.Text(fmt.Sprintf("Chunks: %d", m.chunks))
 			imgui.Text(fmt.Sprintf("Geosets: %d", len(m.geosets)))
+
+			if len(p.group) > 0 {
+				imgui.Separator()
+				p.drawEditionsTable()
+			}
 
 			if len(m.geosets) > 0 {
 				lod := lowestLOD(m.geosets)
