@@ -295,7 +295,7 @@ var editionsTableRows = []struct {
 // chunk count and a geoset/material/lod/vertices/triangles table with a
 // total row, mirroring -mdxinfo.
 func (p *modelPicker) drawModel() {
-	imgui.SetNextWindowPosV(imgui.Vec2{X: 500, Y: 270}, imgui.CondFirstUseEver, imgui.Vec2{})
+	imgui.SetNextWindowPosV(imgui.Vec2{X: 500, Y: 10}, imgui.CondFirstUseEver, imgui.Vec2{})
 	imgui.SetNextWindowSizeV(imgui.Vec2{X: 560, Y: 440}, imgui.CondFirstUseEver)
 	if imgui.Begin("Model") {
 		if p.loaded == -1 {
