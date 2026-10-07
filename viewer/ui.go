@@ -23,7 +23,7 @@ func newUIState(storage *casc.Storage, r root.Root) *uiState {
 	return &uiState{
 		storage:    storage,
 		root:       r,
-		models:     newModelPicker(r),
+		models:     newModelPicker(storage, r),
 		clearColor: [3]float32{0.10, 0.11, 0.13},
 		scale:      1.0,
 	}
