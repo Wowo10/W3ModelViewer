@@ -280,10 +280,8 @@ func writeEntry(w io.Writer, storage *casc.Storage, entry root.Entry) {
 	fmt.Fprintf(w, "%s\t%d\t%x\t%s\t%s\n", entry.Path, encEntry.Size, entry.CKey, entry.Variant.Edition, entry.Variant.OverlayString())
 }
 
-// extractFile reads the root file at path and writes its decoded bytes to
-// dir, under its name inside the mod chain. It reports when the data starts
-// with MDLX (a model).
-func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
+// readFile looks up the root file at path and reads its decoded bytes.
+func readFile(storage *casc.Storage, r root.Root, path string) (root.Entry, []byte) {
 	entry, exists := r.Lookup(path)
 	if !exists {
 		panic(fmt.Sprintf("Path %q not found in root", path))
@@ -298,7 +296,14 @@ func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
 		panic(fmt.Sprintf("%s (content key %x) is not stored locally: encoding key %x not in any idx", path, entry.CKey, ekey))
 	}
 
-	data := storage.ReadByCKey(entry.CKey)
+	return entry, storage.ReadByCKey(entry.CKey)
+}
+
+// extractFile reads the root file at path and writes its decoded bytes to
+// dir, under its name inside the mod chain. It reports when the data starts
+// with MDLX (a model).
+func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
+	entry, data := readFile(storage, r, path)
 
 	dest := filepath.Join(dir, filepath.FromSlash(entry.Name))
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
