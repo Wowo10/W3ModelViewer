@@ -37,7 +37,7 @@ func main() {
 	variants := flag.String("variants", "", "print every edition/overlay version of this path without its mod chain (same format as -list); other output goes to stderr")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
-	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), sequences, default sequence and geoset vertex, triangle and alpha counts of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
+	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), textures, materials, sequences, default sequence and geoset vertex, triangle and alpha counts of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
 	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
 	flag.Parse()
 
@@ -308,9 +308,9 @@ func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
 }
 
 // printMDXInfo reads the MDX model at path and prints its version, chunk
-// list (tag, size, in file order), sequences, default sequence and geoset
-// vertex/triangle/alpha counts to stdout, with per-LOD totals when a model
-// has several LODs.
+// list (tag, size, in file order), textures, materials, sequences, default
+// sequence and geoset vertex/triangle/alpha counts to stdout, with per-LOD
+// totals when a model has several LODs.
 func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 	_, data := readFile(storage, r, path)
 	model := mdx.Read(data)
@@ -323,6 +323,37 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 	fmt.Fprintln(w, "Chunks:", len(model.Chunks))
 	for _, chunk := range model.Chunks {
 		fmt.Fprintf(w, "  %-4s %9d\n", chunk.Tag, len(chunk.Data))
+	}
+
+	if textures := model.Textures(); textures != nil {
+		fmt.Fprintln(w, "Textures:", len(textures))
+		fmt.Fprintf(w, "  %7s %11s %5s path\n", "texture", "replaceable", "flags")
+		for i, t := range textures {
+			line := fmt.Sprintf("  %7d %11d %5d", i, t.ReplaceableID, t.Flags)
+			if t.Path != "" {
+				line += " " + t.Path
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
+
+	if materials := model.Materials(); materials != nil {
+		fmt.Fprintln(w, "Materials:", len(materials))
+		fmt.Fprintf(w, "  %8s %5s %-14s%7s  %5s %5s %s\n", "material", "layer", "filter", "shading", "alpha", "coord", "textures")
+		for mi, mat := range materials {
+			for li, l := range mat.Layers {
+				var texIDs []string
+				for ti, t := range l.Textures {
+					if t.Slot == uint32(ti) {
+						texIDs = append(texIDs, fmt.Sprintf("%d", t.ID))
+					} else {
+						texIDs = append(texIDs, fmt.Sprintf("%d/%d", t.ID, t.Slot))
+					}
+				}
+				shading := fmt.Sprintf("0x%x", l.ShadingFlags)
+				fmt.Fprintf(w, "  %8d %5d %-14s%7s  %5.2f %5d %s\n", mi, li, l.FilterMode, shading, l.Alpha, l.CoordID, strings.Join(texIDs, " "))
+			}
+		}
 	}
 
 	geosets := model.Geosets()
