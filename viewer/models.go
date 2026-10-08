@@ -51,6 +51,8 @@ type geosetLayer struct {
 	uvSet   int        // the layer's coord id
 	flags   uint32     // TEXS flags: bit 0 wrap width, bit 1 wrap height
 	label   string     // "<filter>: <path | team colour | team glow | grey: reason>"
+	mask    root.Entry // resolved ORM .dds when masked
+	masked  bool       // slot 4 is replaceable 1 (team colour) and the slot 2 ORM resolved
 }
 
 // findGeosetLayers builds one geosetLayer per layer of materials[g.MaterialID],
@@ -120,9 +122,47 @@ func findGeosetLayer(res *texture.Resolver, model root.Entry, textures []mdx.Tex
 		l.source = sourceTexture
 		l.entry = resolved
 		l.label = fmt.Sprintf("%s: %s", layer.FilterMode, resolved.Path)
+
+		if mask, ok := findTeamColorMask(res, model, textures, layer); ok {
+			l.mask = mask
+			l.masked = true
+			l.label += " + team colour"
+		}
 	}
 
 	return l
+}
+
+// findTeamColorMask looks for an HD layer's slot 4 (team colour mask) and
+// slot 2 (ORM) textures, returning the ORM's resolved root entry when slot 4
+// is a replaceable id 1 texture and the slot 2 texture has a stored path
+// that resolves.
+func findTeamColorMask(res *texture.Resolver, model root.Entry, textures []mdx.Texture, layer mdx.Layer) (root.Entry, bool) {
+	var haveMask bool
+	var ormID uint32
+	var haveORM bool
+
+	for _, lt := range layer.Textures {
+		switch lt.Slot {
+		case 4:
+			if lt.ID < uint32(len(textures)) {
+				t := textures[lt.ID]
+				haveMask = t.Path == "" && t.ReplaceableID == 1
+			}
+		case 2:
+			ormID, haveORM = lt.ID, true
+		}
+	}
+
+	if !haveMask || !haveORM || ormID >= uint32(len(textures)) {
+		return root.Entry{}, false
+	}
+
+	orm := textures[ormID]
+	if orm.Path == "" {
+		return root.Entry{}, false
+	}
+	return res.Resolve(model, orm)
 }
 
 // modelPicker lists every .mdx root entry with a text filter and an edition

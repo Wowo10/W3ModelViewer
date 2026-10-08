@@ -35,9 +35,12 @@ in vec2 vUV;
 out vec4 fragColor;
 
 uniform sampler2D diffuseMap;
+uniform sampler2D ormMap;
+uniform sampler2D teamColorMap;
 uniform bool textured;
 uniform bool alphaTest;
 uniform bool unshaded;
+uniform bool teamMasked;
 uniform float alpha;
 
 void main() {
@@ -45,6 +48,11 @@ void main() {
 
 	if (alphaTest && tex.a < 0.75) {
 		discard;
+	}
+
+	vec3 rgb = tex.rgb;
+	if (teamMasked) {
+		rgb = mix(rgb, rgb * texture(teamColorMap, vUV).rgb, texture(ormMap, vUV).a);
 	}
 
 	float lit = 1.0;
@@ -57,7 +65,7 @@ void main() {
 		}
 	}
 
-	fragColor = vec4(tex.rgb * lit, tex.a * alpha);
+	fragColor = vec4(rgb * lit, tex.a * alpha);
 }
 ` + "\x00"
 
@@ -71,13 +79,14 @@ const (
 // grey or its texture, normal-lit unless unshaded, alpha-tested and/or
 // blended per its filter mode.
 type meshProgram struct {
-	program          uint32
-	viewProjUniform  int32
-	viewUniform      int32
-	texturedUniform  int32
-	alphaTestUniform int32
-	unshadedUniform  int32
-	alphaUniform     int32
+	program           uint32
+	viewProjUniform   int32
+	viewUniform       int32
+	texturedUniform   int32
+	alphaTestUniform  int32
+	unshadedUniform   int32
+	alphaUniform      int32
+	teamMaskedUniform int32
 }
 
 // newMeshProgram compiles and links the mesh shader. GL must be current.
@@ -108,16 +117,19 @@ func newMeshProgram() *meshProgram {
 
 	gl.UseProgram(program)
 	gl.Uniform1i(gl.GetUniformLocation(program, gl.Str("diffuseMap\x00")), 0)
+	gl.Uniform1i(gl.GetUniformLocation(program, gl.Str("ormMap\x00")), 1)
+	gl.Uniform1i(gl.GetUniformLocation(program, gl.Str("teamColorMap\x00")), 2)
 	gl.UseProgram(0)
 
 	return &meshProgram{
-		program:          program,
-		viewProjUniform:  gl.GetUniformLocation(program, gl.Str("viewProj\x00")),
-		viewUniform:      gl.GetUniformLocation(program, gl.Str("view\x00")),
-		texturedUniform:  gl.GetUniformLocation(program, gl.Str("textured\x00")),
-		alphaTestUniform: gl.GetUniformLocation(program, gl.Str("alphaTest\x00")),
-		unshadedUniform:  gl.GetUniformLocation(program, gl.Str("unshaded\x00")),
-		alphaUniform:     gl.GetUniformLocation(program, gl.Str("alpha\x00")),
+		program:           program,
+		viewProjUniform:   gl.GetUniformLocation(program, gl.Str("viewProj\x00")),
+		viewUniform:       gl.GetUniformLocation(program, gl.Str("view\x00")),
+		texturedUniform:   gl.GetUniformLocation(program, gl.Str("textured\x00")),
+		alphaTestUniform:  gl.GetUniformLocation(program, gl.Str("alphaTest\x00")),
+		unshadedUniform:   gl.GetUniformLocation(program, gl.Str("unshaded\x00")),
+		alphaUniform:      gl.GetUniformLocation(program, gl.Str("alpha\x00")),
+		teamMaskedUniform: gl.GetUniformLocation(program, gl.Str("teamMasked\x00")),
 	}
 }
 
@@ -159,6 +171,7 @@ type gpuLayer struct {
 	alpha        float32
 	wrapS, wrapT int32
 	uvOffset     int32
+	mask         uint32 // ORM texture tinting the diffuse by team colour; 0 = unmasked
 }
 
 // gpuGeoset is one geoset's VAO/VBO/IBO, its layers in material order, its
@@ -204,10 +217,12 @@ func lowestLOD(geosets []mdx.Geoset) uint32 {
 // computed over every geoset, visible or not, so hiding geosets never
 // changes which LOD is rendered. For each layer whose source is
 // sourceTexture, its DDS is read through storage and uploaded once per
-// content key, shared across geosets and layers. Geosets are returned
-// opaque first (first layer's filter none/transparent, or no layers), then
-// blended, each group ordered by priority plane ascending then geoset
-// index. GL must be current.
+// content key, shared across geosets and layers; a masked layer's ORM is
+// likewise uploaded once per content key, but only when its DDS is DXT5 —
+// otherwise the layer draws unmasked. Geosets are returned opaque first
+// (first layer's filter none/transparent, or no layers), then blended, each
+// group ordered by priority plane ascending then geoset index. GL must be
+// current.
 func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, layers [][]geosetLayer, priority []int32) modelMesh {
 	lod := lowestLOD(geosets)
 
@@ -314,6 +329,19 @@ func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, l
 				gpuL.texture = tex
 			}
 
+			if l.masked {
+				tex, ok := mesh.textures[l.mask.CKey]
+				if !ok {
+					data := storage.ReadByCKey(l.mask.CKey)
+					dds := texture.ReadDDS(data)
+					if dds.Format == texture.DXT5 {
+						tex = uploadTexture(dds, data)
+						mesh.textures[l.mask.CKey] = tex
+					}
+				}
+				gpuL.mask = tex
+			}
+
 			gg.layers[j] = gpuL
 		}
 
@@ -374,7 +402,9 @@ func filterGLState(f mdx.FilterMode) (blend bool, src, dst uint32, depthWrite bo
 // blend, depth write) set from its filter mode and shading flags (bit 0
 // unshaded, bit 6 no depth test, bit 7 no depth write), textured when its
 // source resolved (team colour/glow layers bind team's textures), else flat
-// grey. Leaves depth testing, depth writes and blending at their defaults.
+// grey; a masked layer additionally tints its diffuse by team.color where
+// its ORM's alpha says so. Leaves depth testing, depth writes and blending
+// at their defaults.
 func (m *modelMesh) draw(prog *meshProgram, view, proj mat4, team teamTextures) {
 	gl.Disable(gl.CULL_FACE)
 	gl.DepthFunc(gl.LEQUAL) // so a layer stacked on an earlier one at the same depth still passes
@@ -424,6 +454,17 @@ func (m *modelMesh) draw(prog *meshProgram, view, proj mat4, team teamTextures) 
 				gl.Uniform1i(prog.texturedUniform, 1)
 			} else {
 				gl.Uniform1i(prog.texturedUniform, 0)
+			}
+
+			if l.mask != 0 {
+				gl.ActiveTexture(gl.TEXTURE1)
+				gl.BindTexture(gl.TEXTURE_2D, l.mask)
+				gl.ActiveTexture(gl.TEXTURE2)
+				gl.BindTexture(gl.TEXTURE_2D, team.color)
+				gl.ActiveTexture(gl.TEXTURE0)
+				gl.Uniform1i(prog.teamMaskedUniform, 1)
+			} else {
+				gl.Uniform1i(prog.teamMaskedUniform, 0)
 			}
 
 			gl.VertexAttribPointerWithOffset(uvAttrib, 2, gl.FLOAT, false, 8, uintptr(l.uvOffset))
