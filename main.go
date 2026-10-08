@@ -15,6 +15,7 @@ import (
 	"modelView/extract/idxPackages"
 	"modelView/extract/root"
 	"modelView/model/mdx"
+	"modelView/model/texture"
 	"modelView/viewer"
 	"os"
 	"path/filepath"
@@ -37,7 +38,7 @@ func main() {
 	variants := flag.String("variants", "", "print every edition/overlay version of this path without its mod chain (same format as -list); other output goes to stderr")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
-	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), textures, materials, sequences, default sequence and geoset vertex, triangle and alpha counts of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
+	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), textures (each with its resolved .dds path and format, or \"unresolved\"), materials, sequences, default sequence and geoset vertex, triangle and alpha counts of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
 	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
 	flag.Parse()
 
@@ -308,11 +309,12 @@ func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
 }
 
 // printMDXInfo reads the MDX model at path and prints its version, chunk
-// list (tag, size, in file order), textures, materials, sequences, default
-// sequence and geoset vertex/triangle/alpha counts to stdout, with per-LOD
-// totals when a model has several LODs.
+// list (tag, size, in file order), textures (with each one's resolved .dds
+// path and format, or "unresolved"), materials, sequences, default sequence
+// and geoset vertex/triangle/alpha counts to stdout, with per-LOD totals
+// when a model has several LODs.
 func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
-	_, data := readFile(storage, r, path)
+	entry, data := readFile(storage, r, path)
 	model := mdx.Read(data)
 
 	w := bufio.NewWriter(os.Stdout)
@@ -326,6 +328,8 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 	}
 
 	if textures := model.Textures(); textures != nil {
+		resolver := texture.NewResolver(r)
+
 		fmt.Fprintln(w, "Textures:", len(textures))
 		fmt.Fprintf(w, "  %7s %11s %5s path\n", "texture", "replaceable", "flags")
 		for i, t := range textures {
@@ -334,6 +338,14 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 				line += " " + t.Path
 			}
 			fmt.Fprintln(w, line)
+
+			resolved, ok := resolver.Resolve(entry, t)
+			if !ok {
+				fmt.Fprintln(w, strings.Repeat(" ", 28)+"-> unresolved")
+				continue
+			}
+			dds := texture.ReadDDS(storage.ReadByCKey(resolved.CKey))
+			fmt.Fprintf(w, "%s-> %s %s %dx%d %d mips\n", strings.Repeat(" ", 28), resolved.Path, dds.Format, dds.Width, dds.Height, len(dds.Mips))
 		}
 	}
 
