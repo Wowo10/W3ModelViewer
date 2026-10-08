@@ -9,6 +9,7 @@ import (
 	"modelView/extract/casc"
 	"modelView/extract/root"
 	"modelView/model/mdx"
+	"modelView/model/texture"
 )
 
 // modelEntry is one .mdx root entry, with a pre-lowered path for filtering.
@@ -24,16 +25,64 @@ type selectedModel struct {
 	version  uint32
 	chunks   int
 	geosets  []mdx.Geoset
-	sequence string    // default sequence name, "" when the model has none
-	alphas   []float32 // one per geoset, evaluated in the default sequence
+	sequence string          // default sequence name, "" when the model has none
+	alphas   []float32       // one per geoset, evaluated in the default sequence
+	diffuse  []geosetDiffuse // one per geoset
+}
+
+// geosetDiffuse is a geoset's diffuse texture, or why it is drawn grey.
+type geosetDiffuse struct {
+	entry root.Entry // resolved .dds; valid when ok
+	ok    bool
+	uvSet int    // index into the geoset's UVs
+	flags uint32 // TEXS flags: bit 0 wrap width, bit 1 wrap height
+	label string // entry.Path, or "grey: <reason>"
+}
+
+// findGeosetDiffuse picks geosets[i]'s diffuse via texture.FindDiffuse and
+// res.Resolve, reporting why it is grey when it can't be drawn: no usable
+// layer, a replaceable texture, an unresolved stored path, or a coord id
+// outside the geoset's UV sets.
+func findGeosetDiffuse(res *texture.Resolver, model root.Entry, materials []mdx.Material, textures []mdx.Texture, g mdx.Geoset) geosetDiffuse {
+	d, ok := texture.FindDiffuse(materials, textures, g.MaterialID)
+	if !ok {
+		return geosetDiffuse{label: "grey: no texture"}
+	}
+
+	t := textures[d.Texture]
+	if t.Path == "" {
+		reason := fmt.Sprintf("grey: replaceable %d", t.ReplaceableID)
+		if t.ReplaceableID == 1 {
+			reason += " (team colour)"
+		}
+		return geosetDiffuse{label: reason}
+	}
+
+	resolved, ok := res.Resolve(model, t)
+	if !ok {
+		return geosetDiffuse{label: fmt.Sprintf("grey: unresolved %s", t.Path)}
+	}
+
+	if d.CoordID >= uint32(len(g.UVs)) {
+		return geosetDiffuse{label: fmt.Sprintf("grey: no UV set %d", d.CoordID)}
+	}
+
+	return geosetDiffuse{
+		entry: resolved,
+		ok:    true,
+		uvSet: int(d.CoordID),
+		flags: t.Flags,
+		label: resolved.Path,
+	}
 }
 
 // modelPicker lists every .mdx root entry with a text filter and an edition
 // selector, and holds the currently selected model's parsed data and its
 // group of editions.
 type modelPicker struct {
-	storage *casc.Storage
-	root    root.Root
+	storage  *casc.Storage
+	root     root.Root
+	resolver *texture.Resolver
 
 	models   []modelEntry
 	byPath   map[string]int // models[byPath[path]].entry.Path == path
@@ -88,7 +137,7 @@ func countGeosets(version uint32, geosets []mdx.Geoset) modelCounts {
 // newModelPicker collects every root entry whose Name ends in ".mdx" (case-
 // insensitive), sorted by Path, and the editions present among them.
 func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
-	p := &modelPicker{storage: storage, root: r, selected: -1, loaded: -1, counts: map[[16]byte]modelCounts{}}
+	p := &modelPicker{storage: storage, root: r, resolver: texture.NewResolver(r), selected: -1, loaded: -1, counts: map[[16]byte]modelCounts{}}
 
 	seen := map[root.Edition]bool{}
 	for _, entry := range r.Entries {
@@ -144,6 +193,7 @@ func (p *modelPicker) loadModel(idx int) {
 
 	var sequence string
 	var alphas []float32
+	var diffuse []geosetDiffuse
 	if len(geosets) > 0 {
 		seqs := m.Sequences()
 		def, ok := mdx.DefaultSequence(seqs)
@@ -151,6 +201,13 @@ func (p *modelPicker) loadModel(idx int) {
 			sequence = def.Name
 		}
 		alphas = mdx.GeosetAlphas(len(geosets), m.GeosetAnims(), def, ok)
+
+		materials := m.Materials()
+		textures := m.Textures()
+		diffuse = make([]geosetDiffuse, len(geosets))
+		for i, g := range geosets {
+			diffuse[i] = findGeosetDiffuse(p.resolver, entry, materials, textures, g)
+		}
 	}
 
 	p.model = selectedModel{
@@ -161,6 +218,7 @@ func (p *modelPicker) loadModel(idx int) {
 		geosets:  geosets,
 		sequence: sequence,
 		alphas:   alphas,
+		diffuse:  diffuse,
 	}
 	p.loaded = idx
 	p.counts[entry.CKey] = countGeosets(m.Version, geosets)
@@ -319,8 +377,10 @@ func drawFPS() {
 }
 
 // drawModel shows the "Model" window: the selected model's path, version,
-// chunk count and a geoset/material/lod/vertices/triangles table with a
-// total row, mirroring -mdxinfo.
+// chunk count and a geoset/material/lod/vertices/triangles/diffuse table
+// with a total row, mirroring -mdxinfo; the diffuse column names each
+// geoset's resolved texture or why it is drawn grey, scrollable for long
+// paths.
 func (p *modelPicker) drawModel() {
 	imgui.SetNextWindowPosV(imgui.Vec2{X: 500, Y: 10}, imgui.CondFirstUseEver, imgui.Vec2{})
 	imgui.SetNextWindowSizeV(imgui.Vec2{X: 560, Y: 440}, imgui.CondFirstUseEver)
@@ -380,13 +440,14 @@ func (p *modelPicker) drawModel() {
 
 			if len(m.geosets) > 0 {
 				imgui.Separator()
-				if imgui.BeginTableV("##geosets", 6, imgui.TableFlagsScrollY|imgui.TableFlagsRowBg|imgui.TableFlagsBorders, imgui.Vec2{}, 0) {
+				if imgui.BeginTableV("##geosets", 7, imgui.TableFlagsScrollX|imgui.TableFlagsScrollY|imgui.TableFlagsRowBg|imgui.TableFlagsBorders, imgui.Vec2{}, 0) {
 					imgui.TableSetupColumn("geoset")
 					imgui.TableSetupColumn("material")
 					imgui.TableSetupColumn("lod")
 					imgui.TableSetupColumn("vertices")
 					imgui.TableSetupColumn("triangles")
 					imgui.TableSetupColumn("alpha")
+					imgui.TableSetupColumn("diffuse")
 					imgui.TableHeadersRow()
 
 					var totalVertices, totalTriangles int
@@ -404,6 +465,8 @@ func (p *modelPicker) drawModel() {
 						imgui.Text(fmt.Sprintf("%d", g.TriangleCount()))
 						imgui.TableNextColumn()
 						imgui.Text(fmt.Sprintf("%.2f", m.alphas[i]))
+						imgui.TableNextColumn()
+						imgui.TextUnformatted(m.diffuse[i].label)
 
 						totalVertices += g.VertexCount()
 						totalTriangles += g.TriangleCount()
