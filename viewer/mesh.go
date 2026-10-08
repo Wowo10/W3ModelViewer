@@ -293,6 +293,17 @@ func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, l
 				uvOffset: int32(posNormBytes + l.uvSet*uvBlockBytes),
 			}
 
+			if l.flags&1 != 0 {
+				gpuL.wrapS = gl.REPEAT
+			} else {
+				gpuL.wrapS = gl.CLAMP_TO_EDGE
+			}
+			if l.flags&2 != 0 {
+				gpuL.wrapT = gl.REPEAT
+			} else {
+				gpuL.wrapT = gl.CLAMP_TO_EDGE
+			}
+
 			if l.source == sourceTexture {
 				tex, ok := mesh.textures[l.entry.CKey]
 				if !ok {
@@ -301,16 +312,6 @@ func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, l
 					mesh.textures[l.entry.CKey] = tex
 				}
 				gpuL.texture = tex
-				if l.flags&1 != 0 {
-					gpuL.wrapS = gl.REPEAT
-				} else {
-					gpuL.wrapS = gl.CLAMP_TO_EDGE
-				}
-				if l.flags&2 != 0 {
-					gpuL.wrapT = gl.REPEAT
-				} else {
-					gpuL.wrapT = gl.CLAMP_TO_EDGE
-				}
 			}
 
 			gg.layers[j] = gpuL
@@ -372,9 +373,9 @@ func filterGLState(f mdx.FilterMode) (blend bool, src, dst uint32, depthWrite bo
 // geosets first, then blended ones, each layer's GL state (alpha test,
 // blend, depth write) set from its filter mode and shading flags (bit 0
 // unshaded, bit 6 no depth test, bit 7 no depth write), textured when its
-// source resolved, else flat grey. Leaves depth testing, depth writes and
-// blending at their defaults.
-func (m *modelMesh) draw(prog *meshProgram, view, proj mat4) {
+// source resolved (team colour/glow layers bind team's textures), else flat
+// grey. Leaves depth testing, depth writes and blending at their defaults.
+func (m *modelMesh) draw(prog *meshProgram, view, proj mat4, team teamTextures) {
 	gl.Disable(gl.CULL_FACE)
 	gl.DepthFunc(gl.LEQUAL) // so a layer stacked on an earlier one at the same depth still passes
 
@@ -409,8 +410,15 @@ func (m *modelMesh) draw(prog *meshProgram, view, proj mat4) {
 			gl.Uniform1i(prog.alphaTestUniform, boolToInt32(l.filter == mdx.FilterTransparent))
 			gl.Uniform1f(prog.alphaUniform, l.alpha)
 
-			if l.texture != 0 {
-				gl.BindTexture(gl.TEXTURE_2D, l.texture)
+			tex := l.texture
+			switch l.source {
+			case sourceTeamColor:
+				tex = team.color
+			case sourceTeamGlow:
+				tex = team.glow
+			}
+			if tex != 0 {
+				gl.BindTexture(gl.TEXTURE_2D, tex)
 				gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, l.wrapS)
 				gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, l.wrapT)
 				gl.Uniform1i(prog.texturedUniform, 1)

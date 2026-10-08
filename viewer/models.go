@@ -102,6 +102,7 @@ func findGeosetLayer(res *texture.Resolver, model root.Entry, textures []mdx.Tex
 		l.label = fmt.Sprintf("%s: grey: no UV set %d", layer.FilterMode, layer.CoordID)
 		return l
 	}
+	l.flags = t.Flags
 
 	switch {
 	case t.Path == "" && t.ReplaceableID == 1:
@@ -118,7 +119,6 @@ func findGeosetLayer(res *texture.Resolver, model root.Entry, textures []mdx.Tex
 		}
 		l.source = sourceTexture
 		l.entry = resolved
-		l.flags = t.Flags
 		l.label = fmt.Sprintf("%s: %s", layer.FilterMode, resolved.Path)
 	}
 
@@ -149,6 +149,19 @@ type modelPicker struct {
 	group     []int  // indices into models of every edition of groupName, sorted
 
 	counts map[[16]byte]modelCounts // by content key, filled as editions are seen
+
+	player int32 // index into playerNames, default 0 = red; which TeamColorNN/TeamGlowNN to draw
+}
+
+// playerNames is the team colour combo's entries: the 24 standard player
+// colours (00-23, in the game's order) then "neutral" (24; 24-27 are one
+// identical dark grey texture, see roadmap/04-tex/EPIC.md), indexed directly
+// by TeamColor/TeamGlow number.
+var playerNames = []string{
+	"red", "blue", "teal", "purple", "yellow", "orange", "green", "pink",
+	"gray", "light blue", "dark green", "brown", "maroon", "navy",
+	"turquoise", "violet", "wheat", "peach", "mint", "lavender", "coal",
+	"snow", "emerald", "peanut", "neutral",
 }
 
 // modelCounts summarizes one edition's geometry for the side-by-side
@@ -460,6 +473,8 @@ func (p *modelPicker) drawModel() {
 					}
 				}
 			}
+
+			imgui.ComboStrarr("team colour", &p.player, playerNames, int32(len(playerNames)))
 
 			imgui.Text(fmt.Sprintf("Version: %d", m.version))
 			imgui.Text(fmt.Sprintf("Chunks: %d", m.chunks))

@@ -1,10 +1,13 @@
 package viewer
 
 import (
+	"fmt"
 	"strings"
 
+	"github.com/go-gl/gl/v3.2-core/gl"
 	"modelView/extract/casc"
 	"modelView/extract/root"
+	"modelView/model/texture"
 )
 
 // uiState keeps whatever the panels need between frames.
@@ -20,6 +23,16 @@ type uiState struct {
 	meshFor    int    // index into models of the model mesh was built from, -1 = none
 	framedName string // entry.Name the camera was last framed for
 	camera     orbitCamera
+
+	team teamTextures
+}
+
+// teamTextures is the selected player's TeamColorNN/TeamGlowNN, shared by
+// every classic team-coloured layer so switching players doesn't rebuild
+// the mesh.
+type teamTextures struct {
+	color, glow uint32
+	player      int32 // which player these are, -1 = none loaded yet
 }
 
 func newUIState(storage *casc.Storage, r root.Root) *uiState {
@@ -30,6 +43,7 @@ func newUIState(storage *casc.Storage, r root.Root) *uiState {
 		clearColor: [3]float32{0.10, 0.11, 0.13},
 		program:    newMeshProgram(),
 		meshFor:    -1,
+		team:       teamTextures{player: -1},
 	}
 }
 
@@ -52,11 +66,46 @@ func (ui *uiState) syncMesh() {
 	ui.meshFor = ui.models.loaded
 }
 
+// syncTeam uploads the selected player's TeamColorNN/TeamGlowNN textures
+// when it differs from the player last loaded, deleting the previous pair
+// first (and on first use, since player -1 never matches).
+func (ui *uiState) syncTeam() {
+	player := ui.models.player
+	if player == ui.team.player {
+		return
+	}
+
+	if ui.team.player != -1 {
+		gl.DeleteTextures(1, &ui.team.color)
+		gl.DeleteTextures(1, &ui.team.glow)
+	}
+
+	ui.team.color = ui.loadTeamTexture("TeamColor", player)
+	ui.team.glow = ui.loadTeamTexture("TeamGlow", player)
+	ui.team.player = player
+}
+
+// loadTeamTexture reads and uploads War3.w3mod's ReplaceableTextures/<name>/
+// <name>NN.dds for the given player (00-24).
+func (ui *uiState) loadTeamTexture(name string, player int32) uint32 {
+	path := fmt.Sprintf("War3.w3mod:ReplaceableTextures/%s/%s%02d.dds", name, name, player)
+	entry, ok := ui.root.Lookup(path)
+	if !ok {
+		panic(fmt.Sprintf("viewer: team texture not found: %s", path))
+	}
+	data := ui.storage.ReadByCKey(entry.CKey)
+	return uploadTexture(texture.ReadDDS(data), data)
+}
+
 // release frees the GL resources held by the UI. Call it while the GL
 // context is still current.
 func (ui *uiState) release() {
 	ui.mesh.release()
 	ui.program.release()
+	if ui.team.player != -1 {
+		gl.DeleteTextures(1, &ui.team.color)
+		gl.DeleteTextures(1, &ui.team.glow)
+	}
 }
 
 func (ui *uiState) draw() {
