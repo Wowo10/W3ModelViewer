@@ -37,7 +37,7 @@ func main() {
 	variants := flag.String("variants", "", "print every edition/overlay version of this path without its mod chain (same format as -list); other output goes to stderr")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
-	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size) and geoset vertex and triangle counts of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
+	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), sequences, default sequence and geoset vertex, triangle and alpha counts of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
 	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
 	flag.Parse()
 
@@ -308,8 +308,9 @@ func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
 }
 
 // printMDXInfo reads the MDX model at path and prints its version, chunk
-// list (tag, size, in file order) and geoset vertex/triangle counts to
-// stdout, with per-LOD totals when a model has several LODs.
+// list (tag, size, in file order), sequences, default sequence and geoset
+// vertex/triangle/alpha counts to stdout, with per-LOD totals when a model
+// has several LODs.
 func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 	_, data := readFile(storage, r, path)
 	model := mdx.Read(data)
@@ -324,22 +325,39 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 		fmt.Fprintf(w, "  %-4s %9d\n", chunk.Tag, len(chunk.Data))
 	}
 
+	seqs := model.Sequences()
+	fmt.Fprintln(w, "Sequences:", len(seqs))
+	for _, s := range seqs {
+		fmt.Fprintf(w, "  %-32s %6d %6d\n", s.Name, s.Start, s.End)
+	}
+	def, ok := mdx.DefaultSequence(seqs)
+	if ok {
+		fmt.Fprintf(w, "Default sequence: %s (%d-%d)\n", def.Name, def.Start, def.End)
+	} else {
+		fmt.Fprintln(w, "Default sequence: none (all geosets visible)")
+	}
+
 	geosets := model.Geosets()
 	fmt.Fprintln(w, "Geosets:", len(geosets))
 	if len(geosets) == 0 {
 		return
 	}
 
-	fmt.Fprintf(w, "  %6s %8s %3s %9s %9s\n", "geoset", "material", "lod", "vertices", "triangles")
-	var totalVertices, totalTriangles int
+	alphas := mdx.GeosetAlphas(len(geosets), model.GeosetAnims(), def, ok)
+
+	fmt.Fprintf(w, "  %6s %8s %3s %9s %9s %5s\n", "geoset", "material", "lod", "vertices", "triangles", "alpha")
+	var totalVertices, totalTriangles, hidden int
 	lodVertices := map[uint32]int{}
 	lodTriangles := map[uint32]int{}
 	for i, g := range geosets {
-		fmt.Fprintf(w, "  %6d %8d %3d %9d %9d\n", i, g.MaterialID, g.LOD, g.VertexCount(), g.TriangleCount())
+		fmt.Fprintf(w, "  %6d %8d %3d %9d %9d %5.2f\n", i, g.MaterialID, g.LOD, g.VertexCount(), g.TriangleCount(), alphas[i])
 		totalVertices += g.VertexCount()
 		totalTriangles += g.TriangleCount()
 		lodVertices[g.LOD] += g.VertexCount()
 		lodTriangles[g.LOD] += g.TriangleCount()
+		if alphas[i] <= 0 {
+			hidden++
+		}
 	}
 	fmt.Fprintf(w, "  %-19s %9d %9d\n", "total", totalVertices, totalTriangles)
 
@@ -352,6 +370,10 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 		for _, lod := range lods {
 			fmt.Fprintf(w, "  %-19s %9d %9d\n", fmt.Sprintf("lod %d total", lod), lodVertices[lod], lodTriangles[lod])
 		}
+	}
+
+	if ok {
+		fmt.Fprintf(w, "hidden in %s: %d of %d\n", def.Name, hidden, len(geosets))
 	}
 }
 
