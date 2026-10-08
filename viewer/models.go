@@ -19,11 +19,13 @@ type modelEntry struct {
 
 // selectedModel is the parsed model shown in the "Model" window.
 type selectedModel struct {
-	path    string
-	name    string // entry.Name, used to find other editions of this asset
-	version uint32
-	chunks  int
-	geosets []mdx.Geoset
+	path     string
+	name     string // entry.Name, used to find other editions of this asset
+	version  uint32
+	chunks   int
+	geosets  []mdx.Geoset
+	sequence string    // default sequence name, "" when the model has none
+	alphas   []float32 // one per geoset, evaluated in the default sequence
 }
 
 // modelPicker lists every .mdx root entry with a text filter and an edition
@@ -140,12 +142,21 @@ func (p *modelPicker) loadModel(idx int) {
 	m := mdx.Read(data)
 	geosets := m.Geosets()
 
+	seqs := m.Sequences()
+	def, ok := mdx.DefaultSequence(seqs)
+	sequence := ""
+	if ok {
+		sequence = def.Name
+	}
+
 	p.model = selectedModel{
-		path:    entry.Path,
-		name:    entry.Name,
-		version: m.Version,
-		chunks:  len(m.Chunks),
-		geosets: geosets,
+		path:     entry.Path,
+		name:     entry.Name,
+		version:  m.Version,
+		chunks:   len(m.Chunks),
+		geosets:  geosets,
+		sequence: sequence,
+		alphas:   mdx.GeosetAlphas(len(geosets), m.GeosetAnims(), def, ok),
 	}
 	p.loaded = idx
 	p.counts[entry.CKey] = countGeosets(m.Version, geosets)
@@ -342,23 +353,36 @@ func (p *modelPicker) drawModel() {
 
 			if len(m.geosets) > 0 {
 				lod := lowestLOD(m.geosets)
-				drawn := 0
-				for _, g := range m.geosets {
-					if g.LOD == lod {
+				atLOD, drawn := 0, 0
+				for i, g := range m.geosets {
+					if g.LOD != lod {
+						continue
+					}
+					atLOD++
+					if m.alphas[i] > 0 {
 						drawn++
 					}
 				}
-				imgui.Text(fmt.Sprintf("Rendering LOD %d (%d of %d geosets)", lod, drawn, len(m.geosets)))
+				hidden := atLOD - drawn
+				switch {
+				case m.sequence == "":
+					imgui.Text(fmt.Sprintf("Rendering LOD %d, no sequences: %d of %d geosets", lod, atLOD, len(m.geosets)))
+				case drawn == 0:
+					imgui.Text(fmt.Sprintf("Rendering LOD %d in %q: nothing visible", lod, m.sequence))
+				default:
+					imgui.Text(fmt.Sprintf("Rendering LOD %d in %q: %d of %d geosets (%d hidden)", lod, m.sequence, drawn, atLOD, hidden))
+				}
 			}
 
 			if len(m.geosets) > 0 {
 				imgui.Separator()
-				if imgui.BeginTableV("##geosets", 5, imgui.TableFlagsScrollY|imgui.TableFlagsRowBg|imgui.TableFlagsBorders, imgui.Vec2{}, 0) {
+				if imgui.BeginTableV("##geosets", 6, imgui.TableFlagsScrollY|imgui.TableFlagsRowBg|imgui.TableFlagsBorders, imgui.Vec2{}, 0) {
 					imgui.TableSetupColumn("geoset")
 					imgui.TableSetupColumn("material")
 					imgui.TableSetupColumn("lod")
 					imgui.TableSetupColumn("vertices")
 					imgui.TableSetupColumn("triangles")
+					imgui.TableSetupColumn("alpha")
 					imgui.TableHeadersRow()
 
 					var totalVertices, totalTriangles int
@@ -374,6 +398,8 @@ func (p *modelPicker) drawModel() {
 						imgui.Text(fmt.Sprintf("%d", g.VertexCount()))
 						imgui.TableNextColumn()
 						imgui.Text(fmt.Sprintf("%d", g.TriangleCount()))
+						imgui.TableNextColumn()
+						imgui.Text(fmt.Sprintf("%.2f", m.alphas[i]))
 
 						totalVertices += g.VertexCount()
 						totalTriangles += g.TriangleCount()

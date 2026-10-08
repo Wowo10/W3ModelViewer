@@ -141,17 +141,19 @@ func lowestLOD(geosets []mdx.Geoset) uint32 {
 	return lod
 }
 
-// uploadMesh uploads the geosets at the model's lowest LOD to VAO/VBO/IBO
-// pairs, interleaving position and normal (zero-filled when the geoset has
-// no normals) into a single vertex buffer per geoset. GL must be current.
-func uploadMesh(geosets []mdx.Geoset) modelMesh {
+// uploadMesh uploads the geosets at the model's lowest LOD whose alpha is >
+// 0 to VAO/VBO/IBO pairs, interleaving position and normal (zero-filled
+// when the geoset has no normals) into a single vertex buffer per geoset.
+// lowestLOD is computed over every geoset, visible or not, so hiding
+// geosets never changes which LOD is rendered. GL must be current.
+func uploadMesh(geosets []mdx.Geoset, alphas []float32) modelMesh {
 	lod := lowestLOD(geosets)
 
 	mesh := modelMesh{lod: lod}
 	first := true
 
-	for _, g := range geosets {
-		if g.LOD != lod || len(g.Indices) == 0 {
+	for i, g := range geosets {
+		if g.LOD != lod || len(g.Indices) == 0 || alphas[i] <= 0 {
 			continue
 		}
 
