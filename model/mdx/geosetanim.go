@@ -39,9 +39,9 @@ type FloatKey struct {
 // skipped by size). Flags and colour are skipped (not needed yet).
 //
 // GeosetAnims panics ("mdx: GEOA entry %d: ...") on truncated data, an
-// entry running past the chunk, an unknown track tag, or bytes left over at
-// the end of an entry. It panics with "mdx: GEOA parsing supports version
-// 1800 only, got %d" on a GEOA chunk in any other version.
+// entry running past the chunk, or an unknown track tag. It panics with
+// "mdx: GEOA parsing supports version 1800 only, got %d" on a GEOA chunk in
+// any other version.
 func (m Model) GeosetAnims() []GeosetAnim {
 	var geoaChunk *Chunk
 	for i := range m.Chunks {
@@ -101,10 +101,6 @@ func readGeosetAnim(data []byte, start int, index int) (GeosetAnim, int) {
 		}
 	}
 
-	if r.pos != r.limit {
-		panic(fmt.Sprintf("mdx: GEOA entry %d: %d bytes left over", index, r.limit-r.pos))
-	}
-
 	return a, int(size)
 }
 
@@ -120,7 +116,7 @@ func (a GeosetAnim) AlphaAt(s Sequence) float32 {
 		return a.Alpha
 	}
 	for _, k := range t.Keys {
-		if uint32(k.Frame) >= s.Start && uint32(k.Frame) <= s.End {
+		if int64(k.Frame) >= int64(s.Start) && int64(k.Frame) <= int64(s.End) {
 			return k.Value
 		}
 	}
@@ -151,6 +147,14 @@ func GeosetAlphas(geosets int, anims []GeosetAnim, s Sequence, ok bool) []float3
 func readFloatTrack(r *reader, width int) FloatTrack {
 	count := r.u32()
 	t := FloatTrack{Interpolation: r.u32(), GlobalSequence: r.i32()}
+
+	keySize := 4 * (1 + width)
+	if t.Interpolation > 1 {
+		keySize += 8 * width
+	}
+	if uint64(count)*uint64(keySize) > uint64(r.limit-r.pos) {
+		panic(fmt.Sprintf("mdx: %s: truncated at offset %d", r.where, r.pos))
+	}
 
 	t.Keys = make([]FloatKey, count)
 	for i := range t.Keys {
