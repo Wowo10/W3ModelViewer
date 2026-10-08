@@ -142,11 +142,15 @@ func (p *modelPicker) loadModel(idx int) {
 	m := mdx.Read(data)
 	geosets := m.Geosets()
 
-	seqs := m.Sequences()
-	def, ok := mdx.DefaultSequence(seqs)
-	sequence := ""
-	if ok {
-		sequence = def.Name
+	var sequence string
+	var alphas []float32
+	if len(geosets) > 0 {
+		seqs := m.Sequences()
+		def, ok := mdx.DefaultSequence(seqs)
+		if ok {
+			sequence = def.Name
+		}
+		alphas = mdx.GeosetAlphas(len(geosets), m.GeosetAnims(), def, ok)
 	}
 
 	p.model = selectedModel{
@@ -156,7 +160,7 @@ func (p *modelPicker) loadModel(idx int) {
 		chunks:   len(m.Chunks),
 		geosets:  geosets,
 		sequence: sequence,
-		alphas:   mdx.GeosetAlphas(len(geosets), m.GeosetAnims(), def, ok),
+		alphas:   alphas,
 	}
 	p.loaded = idx
 	p.counts[entry.CKey] = countGeosets(m.Version, geosets)

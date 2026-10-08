@@ -325,6 +325,12 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 		fmt.Fprintf(w, "  %-4s %9d\n", chunk.Tag, len(chunk.Data))
 	}
 
+	geosets := model.Geosets()
+	if len(geosets) == 0 {
+		fmt.Fprintln(w, "Geosets:", len(geosets))
+		return
+	}
+
 	seqs := model.Sequences()
 	fmt.Fprintln(w, "Sequences:", len(seqs))
 	for _, s := range seqs {
@@ -337,11 +343,7 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 		fmt.Fprintln(w, "Default sequence: none (all geosets visible)")
 	}
 
-	geosets := model.Geosets()
 	fmt.Fprintln(w, "Geosets:", len(geosets))
-	if len(geosets) == 0 {
-		return
-	}
 
 	alphas := mdx.GeosetAlphas(len(geosets), model.GeosetAnims(), def, ok)
 
