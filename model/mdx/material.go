@@ -44,19 +44,30 @@ type Material struct {
 }
 
 // Layer is one layer of a Material.
+//
+// ShadingFlags: bit 0 unshaded, 1 sphere env map, 4 two-sided, 5 unfogged, 6
+// no depth test, 7 no depth set; 8-10 unnamed, reforged/definitive only.
 type Layer struct {
 	FilterMode    FilterMode
-	ShadingFlags  uint32 // bit 0 unshaded, 1 sphere env map, 4 two-sided, 5 unfogged, 6 no depth test, 7 no depth set; 8-10 unnamed, reforged/definitive only
-	TextureAnimID int32  // -1 when none
+	ShadingFlags  uint32
+	TextureAnimID int32 // -1 when none
 	CoordID       uint32
 	Alpha         float32
 	Textures      []LayerTexture
 }
 
 // LayerTexture is one texture slot of a Layer.
+//
+// Slot is usually the texture's position in Textures: for HD (6-texture)
+// layers, 0 diffuse, 1 normal, 2 ORM, 3 emissive, 4 team colour, 5
+// environment; 1-texture layers use slot 0. In a few fountain/waterfall
+// layers it repeats: besides slot 0 reused at another position (a second
+// diffuse texture, sometimes with a KMTF flipbook), some reuse slot 0 at the
+// emissive position instead, or are missing the team colour texture
+// entirely. See the epic's facts for the exact patterns.
 type LayerTexture struct {
 	ID   uint32
-	Slot uint32 // position in Textures for HD (6-texture) layers: 0 diffuse, 1 normal, 2 ORM, 3 emissive, 4 team colour, 5 environment; a few fountain/waterfall layers reuse slot 0 for a second diffuse texture
+	Slot uint32
 }
 
 // Materials parses the model's MTLS chunk, if any, into materials. It
@@ -77,8 +88,8 @@ type LayerTexture struct {
 // texture id, uint32 slot, and an optional "KMTF" track (texture-id
 // flipbook: key = int32 frame + uint32 id, read as a FloatTrack of width 1
 // and discarded) right after that texture's entry. After the textures,
-// layer tracks run to the layer's end; only "KMTA" (alpha) and "KMTE"
-// (emissive) are seen, both width 1, read as FloatTracks and discarded.
+// layer tracks ("KMTA" alpha, "KMTE" emissive, …) run to the layer's end
+// and are skipped by size, not parsed.
 //
 // Emissive gain, fresnel and the two unknown uint32s are not kept (for the
 // later PBR epic).
@@ -134,6 +145,9 @@ func readMaterial(data []byte, start int, index int) (Material, int) {
 		panic(fmt.Sprintf("mdx: MTLS material %d: want LAYS, got %q", index, tag))
 	}
 	layerCount := r.u32()
+	if uint64(layerCount)*60 > uint64(end-r.pos) {
+		panic(fmt.Sprintf("mdx: MTLS material %d: truncated at offset %d", index, r.pos))
+	}
 
 	mat.Layers = make([]Layer, layerCount)
 	for i := range mat.Layers {
@@ -175,6 +189,9 @@ func readLayer(data []byte, start int, matIndex int, layerIndex int, matEnd int)
 	r.skip(4)  // fresnel team colour
 	r.skip(4)  // unknown, SD/HD shader marker
 	texCount := r.u32()
+	if uint64(texCount)*8 > uint64(r.limit-r.pos) {
+		panic(fmt.Sprintf("mdx: MTLS material %d layer %d: truncated at offset %d", matIndex, layerIndex, r.pos))
+	}
 
 	l.Textures = make([]LayerTexture, texCount)
 	for i := range l.Textures {
@@ -188,10 +205,7 @@ func readLayer(data []byte, start int, matIndex int, layerIndex int, matEnd int)
 		}
 	}
 
-	for r.pos < r.limit {
-		r.tag()
-		readFloatTrack(&r, 1) // KMTA / KMTE, discarded
-	}
+	r.pos = r.limit // layer tracks (KMTA, KMTE, ...) skipped by size
 
 	return l, int(size)
 }
