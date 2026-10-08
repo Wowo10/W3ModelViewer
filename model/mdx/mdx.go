@@ -5,7 +5,8 @@
 // bytes of chunk data. The first chunk is always "VERS", a 4-byte uint32 LE
 // version number.
 //
-// Model.Geosets parses the GEOS chunk; see its doc comment for the layout.
+// Model.Geosets parses the GEOS chunk, Model.Sequences the SEQS chunk and
+// Model.GeosetAnims the GEOA chunk; see their doc comments for the layouts.
 package mdx
 
 import (
