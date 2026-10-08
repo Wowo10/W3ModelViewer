@@ -44,7 +44,7 @@ func (ui *uiState) syncMesh() {
 	}
 
 	ui.mesh.release()
-	ui.mesh = uploadMesh(ui.models.model.geosets, ui.models.model.alphas)
+	ui.mesh = uploadMesh(ui.storage, ui.models.model.geosets, ui.models.model.alphas, ui.models.model.diffuse)
 	if len(ui.mesh.geosets) > 0 && !strings.EqualFold(ui.models.model.name, ui.framedName) {
 		ui.camera.frame(ui.mesh.min, ui.mesh.max)
 		ui.framedName = ui.models.model.name
