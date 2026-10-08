@@ -27,53 +27,102 @@ type selectedModel struct {
 	geosets  []mdx.Geoset
 	sequence string          // default sequence name, "" when the model has none
 	alphas   []float32       // one per geoset, evaluated in the default sequence
-	diffuse  []geosetDiffuse // one per geoset
+	priority []int32         // one per geoset, its material's priority plane
+	layers   [][]geosetLayer // one slice per geoset, one geosetLayer per material layer
 }
 
-// geosetDiffuse is a geoset's diffuse texture, or why it is drawn grey.
-type geosetDiffuse struct {
-	entry root.Entry // resolved .dds; valid when ok
-	ok    bool
-	uvSet int    // index into the geoset's UVs
-	flags uint32 // TEXS flags: bit 0 wrap width, bit 1 wrap height
-	label string // entry.Path, or "grey: <reason>"
+// layerSource is what a layer samples.
+type layerSource int
+
+const (
+	sourceGrey      layerSource = iota // flat grey; label says why
+	sourceTexture                      // entry
+	sourceTeamColor                    // replaceable 1
+	sourceTeamGlow                     // replaceable 2
+)
+
+// geosetLayer is how one material layer of a geoset is drawn.
+type geosetLayer struct {
+	filter  mdx.FilterMode
+	shading uint32
+	alpha   float32 // layer alpha × the geoset's alpha in the default sequence
+	source  layerSource
+	entry   root.Entry // resolved .dds when source == sourceTexture
+	uvSet   int        // the layer's coord id
+	flags   uint32     // TEXS flags: bit 0 wrap width, bit 1 wrap height
+	label   string     // "<filter>: <path | team colour | team glow | grey: reason>"
 }
 
-// findGeosetDiffuse picks geosets[i]'s diffuse via texture.FindDiffuse and
-// res.Resolve, reporting why it is grey when it can't be drawn: no usable
-// layer, a replaceable texture, an unresolved stored path, or a coord id
-// outside the geoset's UV sets.
-func findGeosetDiffuse(res *texture.Resolver, model root.Entry, materials []mdx.Material, textures []mdx.Texture, g mdx.Geoset) geosetDiffuse {
-	d, ok := texture.FindDiffuse(materials, textures, g.MaterialID)
-	if !ok {
-		return geosetDiffuse{label: "grey: no texture"}
+// findGeosetLayers builds one geosetLayer per layer of materials[g.MaterialID],
+// or nil when g.MaterialID is out of range.
+func findGeosetLayers(res *texture.Resolver, model root.Entry, materials []mdx.Material, textures []mdx.Texture, g mdx.Geoset, geosetAlpha float32) []geosetLayer {
+	if g.MaterialID >= uint32(len(materials)) {
+		return nil
 	}
 
-	t := textures[d.Texture]
-	if t.Path == "" {
-		reason := fmt.Sprintf("grey: replaceable %d", t.ReplaceableID)
-		if t.ReplaceableID == 1 {
-			reason += " (team colour)"
+	mLayers := materials[g.MaterialID].Layers
+	layers := make([]geosetLayer, len(mLayers))
+	for i, layer := range mLayers {
+		layers[i] = findGeosetLayer(res, model, textures, g, layer, geosetAlpha)
+	}
+	return layers
+}
+
+// findGeosetLayer builds one geosetLayer from layer's first texture (slot 0
+// in every layer seen in wardata): a resolved stored path, team colour/glow
+// (replaceable 1/2; drawn grey until the team colour/glow textures are
+// bound), or grey with the reason it can't be drawn: no texture, another
+// replaceable id, an unresolved stored path, or a coord id outside the
+// geoset's UV sets.
+func findGeosetLayer(res *texture.Resolver, model root.Entry, textures []mdx.Texture, g mdx.Geoset, layer mdx.Layer, geosetAlpha float32) geosetLayer {
+	l := geosetLayer{
+		filter:  layer.FilterMode,
+		shading: layer.ShadingFlags,
+		alpha:   layer.Alpha * geosetAlpha,
+		uvSet:   int(layer.CoordID),
+	}
+
+	if len(layer.Textures) == 0 {
+		l.label = fmt.Sprintf("%s: grey: no texture", layer.FilterMode)
+		return l
+	}
+
+	id := layer.Textures[0].ID
+	if id >= uint32(len(textures)) {
+		l.label = fmt.Sprintf("%s: grey: no texture", layer.FilterMode)
+		return l
+	}
+
+	t := textures[id]
+	if t.Path == "" && t.ReplaceableID != 1 && t.ReplaceableID != 2 {
+		l.label = fmt.Sprintf("%s: grey: replaceable %d", layer.FilterMode, t.ReplaceableID)
+		return l
+	}
+	if layer.CoordID >= uint32(len(g.UVs)) {
+		l.label = fmt.Sprintf("%s: grey: no UV set %d", layer.FilterMode, layer.CoordID)
+		return l
+	}
+
+	switch {
+	case t.Path == "" && t.ReplaceableID == 1:
+		l.source = sourceTeamColor
+		l.label = fmt.Sprintf("%s: team colour", layer.FilterMode)
+	case t.Path == "" && t.ReplaceableID == 2:
+		l.source = sourceTeamGlow
+		l.label = fmt.Sprintf("%s: team glow", layer.FilterMode)
+	default:
+		resolved, ok := res.Resolve(model, t)
+		if !ok {
+			l.label = fmt.Sprintf("%s: grey: unresolved %s", layer.FilterMode, t.Path)
+			return l
 		}
-		return geosetDiffuse{label: reason}
+		l.source = sourceTexture
+		l.entry = resolved
+		l.flags = t.Flags
+		l.label = fmt.Sprintf("%s: %s", layer.FilterMode, resolved.Path)
 	}
 
-	resolved, ok := res.Resolve(model, t)
-	if !ok {
-		return geosetDiffuse{label: fmt.Sprintf("grey: unresolved %s", t.Path)}
-	}
-
-	if d.CoordID >= uint32(len(g.UVs)) {
-		return geosetDiffuse{label: fmt.Sprintf("grey: no UV set %d", d.CoordID)}
-	}
-
-	return geosetDiffuse{
-		entry: resolved,
-		ok:    true,
-		uvSet: int(d.CoordID),
-		flags: t.Flags,
-		label: resolved.Path,
-	}
+	return l
 }
 
 // modelPicker lists every .mdx root entry with a text filter and an edition
@@ -193,7 +242,8 @@ func (p *modelPicker) loadModel(idx int) {
 
 	var sequence string
 	var alphas []float32
-	var diffuse []geosetDiffuse
+	var priority []int32
+	var layers [][]geosetLayer
 	if len(geosets) > 0 {
 		seqs := m.Sequences()
 		def, ok := mdx.DefaultSequence(seqs)
@@ -204,9 +254,13 @@ func (p *modelPicker) loadModel(idx int) {
 
 		materials := m.Materials()
 		textures := m.Textures()
-		diffuse = make([]geosetDiffuse, len(geosets))
+		priority = make([]int32, len(geosets))
+		layers = make([][]geosetLayer, len(geosets))
 		for i, g := range geosets {
-			diffuse[i] = findGeosetDiffuse(p.resolver, entry, materials, textures, g)
+			if g.MaterialID < uint32(len(materials)) {
+				priority[i] = materials[g.MaterialID].PriorityPlane
+			}
+			layers[i] = findGeosetLayers(p.resolver, entry, materials, textures, g, alphas[i])
 		}
 	}
 
@@ -218,7 +272,8 @@ func (p *modelPicker) loadModel(idx int) {
 		geosets:  geosets,
 		sequence: sequence,
 		alphas:   alphas,
-		diffuse:  diffuse,
+		priority: priority,
+		layers:   layers,
 	}
 	p.loaded = idx
 	p.counts[entry.CKey] = countGeosets(m.Version, geosets)
@@ -377,10 +432,10 @@ func drawFPS() {
 }
 
 // drawModel shows the "Model" window: the selected model's path, version,
-// chunk count and a geoset/material/lod/vertices/triangles/diffuse table
-// with a total row, mirroring -mdxinfo; the diffuse column names each
-// geoset's resolved texture or why it is drawn grey, scrollable for long
-// paths.
+// chunk count and a geoset/material/lod/vertices/triangles/layers table
+// with a total row, mirroring -mdxinfo; the layers column names each
+// geoset's material layers (filter: resolved texture, team colour/glow, or
+// why it is drawn grey), joined with " | ", scrollable for long paths.
 func (p *modelPicker) drawModel() {
 	imgui.SetNextWindowPosV(imgui.Vec2{X: 500, Y: 10}, imgui.CondFirstUseEver, imgui.Vec2{})
 	imgui.SetNextWindowSizeV(imgui.Vec2{X: 560, Y: 440}, imgui.CondFirstUseEver)
@@ -447,7 +502,7 @@ func (p *modelPicker) drawModel() {
 					imgui.TableSetupColumn("vertices")
 					imgui.TableSetupColumn("triangles")
 					imgui.TableSetupColumn("alpha")
-					imgui.TableSetupColumn("diffuse")
+					imgui.TableSetupColumn("layers")
 					imgui.TableHeadersRow()
 
 					var totalVertices, totalTriangles int
@@ -466,7 +521,11 @@ func (p *modelPicker) drawModel() {
 						imgui.TableNextColumn()
 						imgui.Text(fmt.Sprintf("%.2f", m.alphas[i]))
 						imgui.TableNextColumn()
-						imgui.TextUnformatted(m.diffuse[i].label)
+						labels := make([]string, len(m.layers[i]))
+						for j, l := range m.layers[i] {
+							labels[j] = l.label
+						}
+						imgui.TextUnformatted(strings.Join(labels, " | "))
 
 						totalVertices += g.VertexCount()
 						totalTriangles += g.TriangleCount()
