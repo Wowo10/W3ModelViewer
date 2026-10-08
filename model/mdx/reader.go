@@ -44,6 +44,12 @@ func (r *reader) tag() string {
 	return s
 }
 
+// peekTag returns the next 4-byte tag without advancing.
+func (r *reader) peekTag() string {
+	r.need(4)
+	return string(r.data[r.pos : r.pos+4])
+}
+
 func (r *reader) skip(n int) {
 	r.need(n)
 	r.pos += n
