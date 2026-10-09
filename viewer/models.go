@@ -239,7 +239,8 @@ type modelPicker struct {
 
 	counts map[[16]byte]modelCounts // by content key, filled as editions are seen
 
-	player int32 // index into playerNames, default 0 = red; which TeamColorNN/TeamGlowNN to draw
+	player int32    // index into playerNames, default 0 = red; which TeamColorNN/TeamGlowNN to draw
+	play   playback // the Animation window's play/pause/loop/speed state, kept across model switches
 }
 
 // playerNames is the team colour combo's entries: the 24 standard player
@@ -288,7 +289,7 @@ func countGeosets(version uint32, geosets []mdx.Geoset) modelCounts {
 // newModelPicker collects every root entry whose Name ends in ".mdx" (case-
 // insensitive), sorted by Path, and the editions present among them.
 func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
-	p := &modelPicker{storage: storage, root: r, resolver: texture.NewResolver(r), selected: -1, loaded: -1, counts: map[[16]byte]modelCounts{}}
+	p := &modelPicker{storage: storage, root: r, resolver: texture.NewResolver(r), selected: -1, loaded: -1, counts: map[[16]byte]modelCounts{}, play: newPlayback()}
 
 	seen := map[root.Edition]bool{}
 	for _, entry := range r.Entries {
@@ -412,7 +413,8 @@ func (p *modelPicker) loadModel(idx int) {
 	if def != -1 {
 		start = int32(sequences[def].Start)
 	}
-	p.model.setPose(def, start, 0)
+	p.play.frame = float64(start)
+	p.model.setPose(def, start, uint32(uint64(p.play.global)))
 
 	p.loaded = idx
 	p.counts[entry.CKey] = countGeosets(m.Version, geosets)
@@ -501,6 +503,8 @@ func (p *modelPicker) draw() {
 		p.loadModel(p.selected)
 		p.loadGroup(p.selected)
 	}
+
+	p.tick(float64(imgui.CurrentIO().DeltaTime()))
 
 	p.drawModel()
 	p.drawAnimation()
