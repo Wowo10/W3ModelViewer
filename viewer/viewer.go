@@ -4,6 +4,7 @@ package viewer
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"unsafe"
 
@@ -133,13 +134,12 @@ func initGL(window *sdl.Window, glCtx sdl.GLContext) error {
 	}
 	if err := sdl.GLSetSwapInterval(1); err != nil {
 		// Not fatal: some drivers refuse vsync, we just run uncapped.
-		fmt.Println("viewer: vsync unavailable:", err)
+		fmt.Fprintln(os.Stderr, "viewer: vsync unavailable:", err)
 	}
 
 	if err := gl.Init(); err != nil {
 		return fmt.Errorf("gl init: %w", err)
 	}
-	fmt.Println("viewer: OpenGL", gl.GoStr(gl.GetString(gl.VERSION)))
 	return nil
 }
 
