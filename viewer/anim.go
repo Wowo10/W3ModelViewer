@@ -16,6 +16,8 @@ func (p *modelPicker) drawAnimation() {
 		switch {
 		case p.loaded == -1:
 			imgui.Text("Select a model")
+		case len(m.geosets) == 0:
+			imgui.Text("No geosets")
 		case m.seq == -1:
 			imgui.Text("No sequences: bind pose")
 		default:
