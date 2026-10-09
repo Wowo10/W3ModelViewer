@@ -126,6 +126,32 @@ func (a GeosetAnim) AlphaAt(s Sequence) float32 {
 	return a.Alpha
 }
 
+// AlphaAtTime returns the geoset's alpha at at: the static alpha when there
+// is no alpha track, else the track sampled at at (see sampleFloat), on the
+// global clock when the track has a global sequence.
+func (a GeosetAnim) AlphaAtTime(at AnimTime, globals []uint32) float32 {
+	return sampleFloat(a.AlphaTrack, a.Alpha, at, globals)
+}
+
+// GeosetAlphasAtTime returns one alpha per geoset (0..geosets-1), evaluated
+// at at via AlphaAtTime for geosets with a GeosetAnim; geosets without one,
+// or when ok is false (no sequences), get alpha 1.
+func GeosetAlphasAtTime(geosets int, anims []GeosetAnim, globals []uint32, at AnimTime, ok bool) []float32 {
+	alphas := make([]float32, geosets)
+	for i := range alphas {
+		alphas[i] = 1
+	}
+	if !ok {
+		return alphas
+	}
+	for _, a := range anims {
+		if int(a.GeosetID) < len(alphas) {
+			alphas[a.GeosetID] = a.AlphaAtTime(at, globals)
+		}
+	}
+	return alphas
+}
+
 // GeosetAlphas returns one alpha per geoset (0..geosets-1), evaluated at the
 // start of sequence s via AlphaAt for geosets with a GeosetAnim; geosets
 // without one, or when ok is false (no sequences), get alpha 1.
