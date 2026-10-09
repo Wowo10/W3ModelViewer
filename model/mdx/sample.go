@@ -215,9 +215,9 @@ func hermite3(v0, out0, in1, v1 [3]float32, t float32) [3]float32 {
 	}
 }
 
-// bezier evaluates the cubic Bezier curve with control points v0, v0+out0,
-// v1+in1, v1 at t (the engine stores out0/in1 as the tangent, not an
-// absolute control point).
+// bezier evaluates the cubic Bezier curve with control points v0, out0,
+// in1, v1 at t (out0/in1 are absolute control points, not tangents relative
+// to v0/v1).
 func bezier(v0, out0, in1, v1, t float32) float32 {
 	u := 1 - t
 	return v0*u*u*u + out0*3*t*u*u + in1*3*t*t*u + v1*t*t*t
