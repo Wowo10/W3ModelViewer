@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/AllenDang/cimgui-go/imgui"
 	"github.com/go-gl/gl/v3.2-core/gl"
 	"modelView/extract/casc"
 	"modelView/extract/root"
@@ -129,4 +130,23 @@ func (ui *uiState) release() {
 
 func (ui *uiState) draw() {
 	ui.models.draw()
+	drawFPS()
+}
+
+// drawFPS draws the frame rate on the foreground draw list, above every
+// window, in the main viewport's top-right corner, on a dark translucent
+// box so it stays readable over any window or the model.
+func drawFPS() {
+	fr := imgui.CurrentIO().Framerate()
+	text := fmt.Sprintf("%.0f FPS (%.1f ms)", fr, 1000/fr)
+	size := imgui.CalcTextSize(text)
+
+	const margin, pad = 10, 4
+	display := imgui.CurrentIO().DisplaySize()
+	max := imgui.Vec2{X: display.X - margin, Y: margin + pad*2 + size.Y}
+	min := imgui.Vec2{X: max.X - pad*2 - size.X, Y: margin}
+
+	dl := imgui.ForegroundDrawListViewportPtr()
+	dl.AddRectFilledV(min, max, imgui.ColorU32Vec4(imgui.Vec4{X: 0, Y: 0, Z: 0, W: 0.6}), 3, imgui.DrawFlagsNone)
+	dl.AddTextVec2(imgui.Vec2{X: min.X + pad, Y: min.Y + pad}, imgui.ColorU32Col(imgui.ColText), text)
 }
