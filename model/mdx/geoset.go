@@ -15,6 +15,11 @@ type Geoset struct {
 	Indices    []uint16    // triangle list, 3 per triangle
 	MaterialID uint32
 	LOD        uint32
+
+	VertexGroups []uint8  // GNDX: matrix group per vertex; empty when Skin is set
+	GroupSizes   []uint32 // MTGC: node count per matrix group
+	GroupNodes   []uint32 // MATS: node object ids, GroupSizes[i] per group in order
+	Skin         []uint16 // SKIN: per vertex 4 indices into GroupNodes, then 4 weights (sum 255); nil when absent
 }
 
 // VertexCount returns the number of vertices in the geoset.
@@ -37,13 +42,14 @@ func (g Geoset) TriangleCount() int { return len(g.Indices) / 3 }
 //  4. extent (float32 radius + float32[3] min + float32[3] max = 28 B),
 //     uint32 n sequence extents of 28 B each;
 //  5. optional TANG n, float32[4n]; then optional SKIN n, uint16[n] — the
-//     count is in 2-byte units (n = 8 x vertices: 4 bone indices + 4
-//     weights per vertex);
+//     count is in 2-byte units (n = 8 x vertices: per vertex, 4 uint16
+//     indices into MATS then 4 uint16 weights, summing to 255);
 //  6. UVAS uint32 sets, then per set UVBS n, float32[2n].
 //
-// GNDX, MTGC, MATS, selection group/flags, LOD name, extents, TANG and
-// SKIN are skipped (by size); PTYP and PCNT are only checked (one group of
-// type 4, summing to the PVTX count); the rest is kept.
+// Selection group/flags, LOD name, extents and TANG are skipped (by size);
+// PTYP and PCNT are only checked (one group of type 4, summing to the PVTX
+// count); GNDX, MTGC, MATS and SKIN are kept (see VertexGroups, GroupSizes,
+// GroupNodes and Skin); the rest is kept.
 //
 // Geosets panics (mdx: GEOS geoset %d: ...) on truncated data, a geoset
 // running past the chunk, an unexpected subchunk tag, a face type other
@@ -120,13 +126,13 @@ func readGeoset(data []byte, start int, index int) (Geoset, int) {
 	g.Indices = r.uint16s(n)
 
 	n = r.subchunk("GNDX")
-	r.skip(n) // uint8[n]
+	g.VertexGroups = r.uint8s(n)
 
 	n = r.subchunk("MTGC")
-	r.skip(4 * n) // uint32[n]
+	g.GroupSizes = r.uint32s(n)
 
 	n = r.subchunk("MATS")
-	r.skip(4 * n) // uint32[n]
+	g.GroupNodes = r.uint32s(n)
 
 	g.MaterialID = r.u32()
 	r.skip(4) // selection group
@@ -149,7 +155,7 @@ func readGeoset(data []byte, start int, index int) (Geoset, int) {
 		tag := r.peekTag()
 		if tag == "SKIN" {
 			n = r.subchunk("SKIN")
-			r.skip(2 * n) // uint16[n]
+			g.Skin = r.uint16s(n)
 		}
 	}
 
@@ -222,6 +228,14 @@ func (r *geosReader) uint32s(n int) []uint32 {
 		out[i] = binary.LittleEndian.Uint32(r.data[r.pos : r.pos+4])
 		r.pos += 4
 	}
+	return out
+}
+
+func (r *geosReader) uint8s(n int) []uint8 {
+	r.need(n)
+	out := make([]uint8, n)
+	copy(out, r.data[r.pos:r.pos+n])
+	r.pos += n
 	return out
 }
 
