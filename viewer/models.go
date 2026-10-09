@@ -350,11 +350,28 @@ func defaultSequenceIndex(seqs []mdx.Sequence) int32 {
 	return -1
 }
 
+// sequenceIndexByName returns the index of the first sequence whose name
+// matches name case-insensitively, or -1 when none does (including when
+// name is "").
+func sequenceIndexByName(seqs []mdx.Sequence, name string) int32 {
+	if name == "" {
+		return -1
+	}
+	for i, s := range seqs {
+		if strings.EqualFold(s.Name, name) {
+			return int32(i)
+		}
+	}
+	return -1
+}
+
 // loadModel reads and parses the model at models[idx] through storage,
 // keeping its version, chunk count, geosets and skeleton in p.model, posed
-// at the default sequence's start frame (identity matrices and alpha 1 when
-// the model has no sequences).
+// at the previous model's sequence by name when the new model has one, else
+// the default sequence's start frame (identity matrices and alpha 1 when the
+// model has no sequences).
 func (p *modelPicker) loadModel(idx int) {
+	previousSequence := p.model.sequence
 	entry := p.models[idx].entry
 	data := p.storage.ReadByCKey(entry.CKey)
 	m := mdx.Read(data)
@@ -409,13 +426,16 @@ func (p *modelPicker) loadModel(idx int) {
 		globals:     globals,
 	}
 
-	def := defaultSequenceIndex(sequences)
+	seq := sequenceIndexByName(sequences, previousSequence)
+	if seq == -1 {
+		seq = defaultSequenceIndex(sequences)
+	}
 	start := int32(0)
-	if def != -1 {
-		start = int32(sequences[def].Start)
+	if seq != -1 {
+		start = int32(sequences[seq].Start)
 	}
 	p.play.frame = float64(start)
-	p.model.setPose(def, start, uint32(uint64(p.play.global)))
+	p.model.setPose(seq, start, uint32(uint64(p.play.global)))
 
 	p.loaded = idx
 	p.counts[entry.CKey] = countGeosets(m.Version, geosets)
