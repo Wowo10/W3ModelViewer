@@ -417,6 +417,7 @@ func (m *modelMesh) draw(prog *meshProgram, view, proj mat4, team teamTextures) 
 	gl.ActiveTexture(gl.TEXTURE0)
 	for _, g := range m.geosets {
 		gl.BindVertexArray(g.vao)
+		gl.BindBuffer(gl.ARRAY_BUFFER, g.vbo) // VAO state doesn't cover ARRAY_BUFFER; the UV pointer below needs it bound
 
 		for _, l := range g.layers {
 			blend, src, dst, depthWrite := filterGLState(l.filter)
