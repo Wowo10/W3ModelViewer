@@ -386,6 +386,24 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 		fmt.Fprintln(w, "Default sequence: none (all geosets visible)")
 	}
 
+	if globals := model.GlobalSequences(); globals != nil {
+		lens := make([]string, len(globals))
+		for i, l := range globals {
+			lens[i] = fmt.Sprintf("%d", l)
+		}
+		fmt.Fprintf(w, "Global sequences: %d (len %s)\n", len(globals), strings.Join(lens, " "))
+	} else {
+		fmt.Fprintln(w, "Global sequences: 0")
+	}
+	fmt.Fprintln(w, "Pivots:", len(model.Pivots()))
+
+	bones, helpers := model.Bones(), model.Helpers()
+	fmt.Fprintf(w, "Nodes: %d bones, %d helpers\n", len(bones), len(helpers))
+	fmt.Fprintf(w, "  %-11s %6s %6s %5s %6s %7s %6s %6s\n", "track", "tracks", "keys", "none", "linear", "hermite", "bezier", "global")
+	printTrackCounts(w, "translation", collectTrackInterps(bones, helpers, func(n mdx.Node) *mdx.Track[[3]float32] { return n.Translation }))
+	printTrackCounts(w, "rotation", collectTrackInterps(bones, helpers, func(n mdx.Node) *mdx.Track[[4]float32] { return n.Rotation }))
+	printTrackCounts(w, "scale", collectTrackInterps(bones, helpers, func(n mdx.Node) *mdx.Track[[3]float32] { return n.Scale }))
+
 	fmt.Fprintln(w, "Geosets:", len(geosets))
 
 	alphas := mdx.GeosetAlphas(len(geosets), model.GeosetAnims(), def, ok)
@@ -420,6 +438,52 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 	if ok {
 		fmt.Fprintf(w, "hidden in %s: %d of %d\n", def.Name, hidden, len(geosets))
 	}
+}
+
+// trackCounts tallies one kind of track (translation, rotation or scale)
+// across a model's bones and helpers, for printMDXInfo.
+type trackCounts struct {
+	tracks, keys                          int
+	none, linear, hermite, bezier, global int
+}
+
+// collectTrackInterps tallies the tracks returned by get over every bone
+// and helper node.
+func collectTrackInterps[T any](bones []mdx.Bone, helpers []mdx.Node, get func(mdx.Node) *mdx.Track[T]) trackCounts {
+	var c trackCounts
+	add := func(n mdx.Node) {
+		t := get(n)
+		if t == nil {
+			return
+		}
+		c.tracks++
+		c.keys += len(t.Keys)
+		switch t.Interpolation {
+		case mdx.InterpNone:
+			c.none++
+		case mdx.InterpLinear:
+			c.linear++
+		case mdx.InterpHermite:
+			c.hermite++
+		case mdx.InterpBezier:
+			c.bezier++
+		}
+		if t.GlobalSequence >= 0 {
+			c.global++
+		}
+	}
+	for _, b := range bones {
+		add(b.Node)
+	}
+	for _, h := range helpers {
+		add(h)
+	}
+	return c
+}
+
+// printTrackCounts prints one row of the node track table in printMDXInfo.
+func printTrackCounts(w io.Writer, name string, c trackCounts) {
+	fmt.Fprintf(w, "  %-11s %6d %6d %5d %6d %7d %6d %6d\n", name, c.tracks, c.keys, c.none, c.linear, c.hermite, c.bezier, c.global)
 }
 
 // globRegexp compiles a shell-style glob into an anchored regexp, where *
