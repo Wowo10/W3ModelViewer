@@ -18,17 +18,63 @@ type modelEntry struct {
 	lower string
 }
 
-// selectedModel is the parsed model shown in the "Model" window.
+// selectedModel is the parsed model shown in the "Model" and "Animation"
+// windows, posed at (seq, frame).
 type selectedModel struct {
 	path     string
 	name     string // entry.Name, used to find other editions of this asset
 	version  uint32
 	chunks   int
 	geosets  []mdx.Geoset
-	sequence string          // default sequence name, "" when the model has none
-	alphas   []float32       // one per geoset, evaluated in the default sequence
 	priority []int32         // one per geoset, its material's priority plane
 	layers   [][]geosetLayer // one slice per geoset, one geosetLayer per material layer
+
+	skeleton    mdx.Skeleton
+	pivots      int // len(mdx.Model.Pivots()), the matrices array size
+	sequences   []mdx.Sequence
+	geosetAnims []mdx.GeosetAnim
+	globals     []uint32
+
+	seq      int32 // index into sequences, -1 when there are none
+	frame    int32
+	sequence string // sequences[seq].Name, "" when seq == -1
+
+	alphas   []float32  // one per geoset, evaluated at (seq, frame)
+	matrices []mdx.Mat4 // one per object id, evaluated at (seq, frame)
+	pose     int        // bumped by setPose, so the viewer knows to re-upload
+}
+
+// identityMat4 is the bind-pose matrix used for every object id when a
+// model has no sequences.
+var identityMat4 = mdx.Mat4{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
+
+// setPose recomputes alphas and matrices at (seq, frame) and bumps pose.
+// seq must be -1 (no sequences) or a valid index into m.sequences.
+func (m *selectedModel) setPose(seq, frame int32) {
+	m.seq, m.frame = seq, frame
+
+	ok := seq != -1
+	var at mdx.AnimTime
+	if ok {
+		s := m.sequences[seq]
+		m.sequence = s.Name
+		at = mdx.AnimTime{Sequence: s, Frame: uint32(frame)}
+	} else {
+		m.sequence = ""
+	}
+
+	m.alphas = mdx.GeosetAlphasAtTime(len(m.geosets), m.geosetAnims, m.globals, at, ok)
+
+	if ok {
+		m.matrices = m.skeleton.WorldMatrices(at)
+	} else {
+		m.matrices = make([]mdx.Mat4, m.pivots)
+		for i := range m.matrices {
+			m.matrices[i] = identityMat4
+		}
+	}
+
+	m.pose++
 }
 
 // layerSource is what a layer samples.
@@ -285,26 +331,40 @@ func (p *modelPicker) refresh() {
 	}
 }
 
+// defaultSequenceIndex returns the index of the sequence mdx.DefaultSequence
+// would pick (the first "stand*", else the first sequence), or -1 when seqs
+// is empty.
+func defaultSequenceIndex(seqs []mdx.Sequence) int32 {
+	for i, s := range seqs {
+		if strings.HasPrefix(strings.ToLower(s.Name), "stand") {
+			return int32(i)
+		}
+	}
+	if len(seqs) > 0 {
+		return 0
+	}
+	return -1
+}
+
 // loadModel reads and parses the model at models[idx] through storage,
-// keeping its version, chunk count and geosets in p.model.
+// keeping its version, chunk count, geosets and skeleton in p.model, posed
+// at the default sequence's start frame (identity matrices and alpha 1 when
+// the model has no sequences).
 func (p *modelPicker) loadModel(idx int) {
 	entry := p.models[idx].entry
 	data := p.storage.ReadByCKey(entry.CKey)
 	m := mdx.Read(data)
 	geosets := m.Geosets()
 
-	var sequence string
-	var alphas []float32
 	var priority []int32
 	var layers [][]geosetLayer
-	if len(geosets) > 0 {
-		seqs := m.Sequences()
-		def, ok := mdx.DefaultSequence(seqs)
-		if ok {
-			sequence = def.Name
-		}
-		alphas = mdx.GeosetAlphas(len(geosets), m.GeosetAnims(), def, ok)
+	var skeleton mdx.Skeleton
+	var sequences []mdx.Sequence
+	var geosetAnims []mdx.GeosetAnim
+	var globals []uint32
+	pivots := len(m.Pivots())
 
+	if len(geosets) > 0 {
 		materials := m.Materials()
 		textures := m.Textures()
 		priority = make([]int32, len(geosets))
@@ -315,19 +375,35 @@ func (p *modelPicker) loadModel(idx int) {
 			}
 			layers[i] = findGeosetLayers(p.resolver, entry, materials, textures, g)
 		}
+
+		skeleton = mdx.NewSkeleton(m)
+		sequences = m.Sequences()
+		geosetAnims = m.GeosetAnims()
+		globals = m.GlobalSequences()
 	}
 
 	p.model = selectedModel{
-		path:     entry.Path,
-		name:     entry.Name,
-		version:  m.Version,
-		chunks:   len(m.Chunks),
-		geosets:  geosets,
-		sequence: sequence,
-		alphas:   alphas,
-		priority: priority,
-		layers:   layers,
+		path:        entry.Path,
+		name:        entry.Name,
+		version:     m.Version,
+		chunks:      len(m.Chunks),
+		geosets:     geosets,
+		priority:    priority,
+		layers:      layers,
+		skeleton:    skeleton,
+		pivots:      pivots,
+		sequences:   sequences,
+		geosetAnims: geosetAnims,
+		globals:     globals,
 	}
+
+	def := defaultSequenceIndex(sequences)
+	start := int32(0)
+	if def != -1 {
+		start = int32(sequences[def].Start)
+	}
+	p.model.setPose(def, start)
+
 	p.loaded = idx
 	p.counts[entry.CKey] = countGeosets(m.Version, geosets)
 }
@@ -542,9 +618,9 @@ func (p *modelPicker) drawModel() {
 				case m.sequence == "":
 					imgui.Text(fmt.Sprintf("Rendering LOD %d, no sequences: %d of %d geosets", lod, atLOD, len(m.geosets)))
 				case drawn == 0:
-					imgui.Text(fmt.Sprintf("Rendering LOD %d in %q: nothing visible", lod, m.sequence))
+					imgui.Text(fmt.Sprintf("Rendering LOD %d in %q at frame %d: nothing visible", lod, m.sequence, m.frame))
 				default:
-					imgui.Text(fmt.Sprintf("Rendering LOD %d in %q: %d of %d geosets (%d hidden)", lod, m.sequence, drawn, atLOD, hidden))
+					imgui.Text(fmt.Sprintf("Rendering LOD %d in %q at frame %d: %d of %d geosets (%d hidden)", lod, m.sequence, m.frame, drawn, atLOD, hidden))
 				}
 			}
 
