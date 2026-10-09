@@ -333,16 +333,16 @@ func (p *modelPicker) refresh() {
 }
 
 // defaultSequenceIndex returns the index of the sequence mdx.DefaultSequence
-// would pick (the first "stand*", else the first sequence), or -1 when seqs
-// is empty.
+// picks, or -1 when seqs is empty.
 func defaultSequenceIndex(seqs []mdx.Sequence) int32 {
+	def, ok := mdx.DefaultSequence(seqs)
+	if !ok {
+		return -1
+	}
 	for i, s := range seqs {
-		if strings.HasPrefix(strings.ToLower(s.Name), "stand") {
+		if s == def {
 			return int32(i)
 		}
-	}
-	if len(seqs) > 0 {
-		return 0
 	}
 	return -1
 }
