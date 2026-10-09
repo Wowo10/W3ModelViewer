@@ -6,8 +6,10 @@
 // version number.
 //
 // Model.Geosets parses the GEOS chunk, Model.Sequences the SEQS chunk,
-// Model.GeosetAnims the GEOA chunk, Model.Textures the TEXS chunk and
-// Model.Materials the MTLS chunk; see their doc comments for the layouts.
+// Model.GeosetAnims the GEOA chunk, Model.Textures the TEXS chunk,
+// Model.Materials the MTLS chunk, Model.Bones the BONE chunk, Model.Helpers
+// the HELP chunk, Model.Pivots the PIVT chunk and Model.GlobalSequences the
+// GLBS chunk; see their doc comments for the layouts.
 package mdx
 
 import (
