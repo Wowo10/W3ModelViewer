@@ -38,7 +38,7 @@ func main() {
 	variants := flag.String("variants", "", "print every edition/overlay version of this path without its mod chain (same format as -list); other output goes to stderr")
 	extract := flag.String("extract", "", "extract the root file at this full path (including mod chain) to -out")
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
-	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), textures (each with its resolved .dds path and format, or \"unresolved\"), materials, sequences, default sequence and geoset vertex, triangle and alpha counts of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
+	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), textures (each with its resolved .dds path and format, or \"unresolved\"), materials, sequences, default sequence, geoset vertex, triangle and alpha counts and a skinning summary of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
 	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
 	flag.Parse()
 
@@ -310,9 +310,9 @@ func extractFile(storage *casc.Storage, r root.Root, path, dir string) {
 
 // printMDXInfo reads the MDX model at path and prints its version, chunk
 // list (tag, size, in file order), textures (with each one's resolved .dds
-// path and format, or "unresolved"), materials, sequences, default sequence
-// and geoset vertex/triangle/alpha counts to stdout, with per-LOD totals
-// when a model has several LODs.
+// path and format, or "unresolved"), materials, sequences, default sequence,
+// geoset vertex/triangle/alpha counts and a skinning summary to stdout, with
+// per-LOD totals when a model has several LODs.
 func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 	entry, data := readFile(storage, r, path)
 	model := mdx.Read(data)
@@ -438,6 +438,37 @@ func printMDXInfo(storage *casc.Storage, r root.Root, path string) {
 	if ok {
 		fmt.Fprintf(w, "hidden in %s: %d of %d\n", def.Name, hidden, len(geosets))
 	}
+
+	var skinGeosets, matrixGroupGeosets int
+	influencesPerVertex := map[int]int{}
+	for _, g := range geosets {
+		if g.Skin != nil {
+			skinGeosets++
+		} else {
+			matrixGroupGeosets++
+		}
+		influences := g.Influences()
+		for v := 0; v < g.VertexCount(); v++ {
+			used := 0
+			for i := 0; i < mdx.MaxInfluences; i++ {
+				if influences.Weights[v*mdx.MaxInfluences+i] > 0 {
+					used++
+				}
+			}
+			influencesPerVertex[used]++
+		}
+	}
+	counts := make([]int, 0, len(influencesPerVertex))
+	for n := range influencesPerVertex {
+		counts = append(counts, n)
+	}
+	sort.Ints(counts)
+	parts := make([]string, 0, len(counts))
+	for _, n := range counts {
+		parts = append(parts, fmt.Sprintf("%d:%d", n, influencesPerVertex[n]))
+	}
+	fmt.Fprintf(w, "Skinning: %d SKIN geosets, %d matrix-group geosets, influences per vertex %s\n",
+		skinGeosets, matrixGroupGeosets, strings.Join(parts, " "))
 }
 
 // trackCounts tallies one kind of track (translation, rotation or scale)
