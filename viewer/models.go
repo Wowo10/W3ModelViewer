@@ -40,6 +40,8 @@ type selectedModel struct {
 	frame    int32
 	sequence string // sequences[seq].Name, "" when seq == -1
 
+	global uint32 // the global clock passed to the last setPose
+
 	alphas   []float32  // one per geoset, evaluated at (seq, frame)
 	matrices []mdx.Mat4 // one per object id, evaluated at (seq, frame)
 	pose     int        // bumped by setPose, so the viewer knows to re-upload
@@ -49,17 +51,17 @@ type selectedModel struct {
 // model has no sequences.
 var identityMat4 = mdx.Mat4{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
 
-// setPose recomputes alphas and matrices at (seq, frame) and bumps pose.
-// seq must be -1 (no sequences) or a valid index into m.sequences.
-func (m *selectedModel) setPose(seq, frame int32) {
-	m.seq, m.frame = seq, frame
+// setPose recomputes alphas and matrices at (seq, frame, global) and bumps
+// pose. seq must be -1 (no sequences) or a valid index into m.sequences.
+func (m *selectedModel) setPose(seq, frame int32, global uint32) {
+	m.seq, m.frame, m.global = seq, frame, global
 
 	ok := seq != -1
 	var at mdx.AnimTime
 	if ok {
 		s := m.sequences[seq]
 		m.sequence = s.Name
-		at = mdx.AnimTime{Sequence: s, Frame: uint32(frame)}
+		at = mdx.AnimTime{Sequence: s, Frame: uint32(frame), Global: global}
 	} else {
 		m.sequence = ""
 	}
@@ -410,7 +412,7 @@ func (p *modelPicker) loadModel(idx int) {
 	if def != -1 {
 		start = int32(sequences[def].Start)
 	}
-	p.model.setPose(def, start)
+	p.model.setPose(def, start, 0)
 
 	p.loaded = idx
 	p.counts[entry.CKey] = countGeosets(m.Version, geosets)

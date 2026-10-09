@@ -22,7 +22,7 @@ func (p *modelPicker) drawAnimation() {
 			imgui.Text("No sequences: bind pose")
 		default:
 			if imgui.ComboStrarr("sequence", &m.seq, m.seqLabels, int32(len(m.seqLabels))) {
-				m.setPose(m.seq, int32(m.sequences[m.seq].Start))
+				m.setPose(m.seq, int32(m.sequences[m.seq].Start), 0)
 			}
 
 			s := m.sequences[m.seq]
@@ -33,10 +33,10 @@ func (p *modelPicker) drawAnimation() {
 
 			frame := m.frame
 			if imgui.SliderInt("frame", &frame, start, end) {
-				m.setPose(m.seq, frame)
+				m.setPose(m.seq, frame, 0)
 			}
 			if imgui.Button("start") {
-				m.setPose(m.seq, start)
+				m.setPose(m.seq, start, 0)
 			}
 		}
 	}
