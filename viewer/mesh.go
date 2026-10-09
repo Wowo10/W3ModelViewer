@@ -15,17 +15,41 @@ const vertexShaderSrc = glslVersion + `
 in vec3 position;
 in vec3 normal;
 in vec2 uv;
+in uvec4 nodes0;
+in uvec4 nodes1;
+in vec4 weights0;
+in vec4 weights1;
 
 uniform mat4 viewProj;
 uniform mat4 view;
+uniform samplerBuffer nodeMatrices;
 
 out vec3 vNormal;
 out vec2 vUV;
 
+mat4 nodeMatrix(uint id) {
+	int base = int(id) * 4;
+	return mat4(
+		texelFetch(nodeMatrices, base),
+		texelFetch(nodeMatrices, base + 1),
+		texelFetch(nodeMatrices, base + 2),
+		texelFetch(nodeMatrices, base + 3)
+	);
+}
+
 void main() {
-	vNormal = mat3(view) * normal;
+	mat4 skin = weights0[0] * nodeMatrix(nodes0[0])
+	          + weights0[1] * nodeMatrix(nodes0[1])
+	          + weights0[2] * nodeMatrix(nodes0[2])
+	          + weights0[3] * nodeMatrix(nodes0[3])
+	          + weights1[0] * nodeMatrix(nodes1[0])
+	          + weights1[1] * nodeMatrix(nodes1[1])
+	          + weights1[2] * nodeMatrix(nodes1[2])
+	          + weights1[3] * nodeMatrix(nodes1[3]);
+
+	vNormal = mat3(view) * mat3(skin) * normal;
 	vUV = uv;
-	gl_Position = viewProj * vec4(position, 1.0);
+	gl_Position = viewProj * skin * vec4(position, 1.0);
 }
 ` + "\x00"
 
@@ -73,7 +97,15 @@ const (
 	positionAttrib = 0
 	normalAttrib   = 1
 	uvAttrib       = 2
+	nodes0Attrib   = 3
+	nodes1Attrib   = 4
+	weights0Attrib = 5
+	weights1Attrib = 6
 )
+
+// nodeMatricesUnit is the texture unit the node matrices buffer is bound
+// to, past diffuseMap (0), ormMap (1) and teamColorMap (2).
+const nodeMatricesUnit = 3
 
 // meshProgram is the single shader used to draw every geoset layer: flat
 // grey or its texture, normal-lit unless unshaded, alpha-tested and/or
@@ -100,6 +132,10 @@ func newMeshProgram() *meshProgram {
 	gl.BindAttribLocation(program, positionAttrib, gl.Str("position\x00"))
 	gl.BindAttribLocation(program, normalAttrib, gl.Str("normal\x00"))
 	gl.BindAttribLocation(program, uvAttrib, gl.Str("uv\x00"))
+	gl.BindAttribLocation(program, nodes0Attrib, gl.Str("nodes0\x00"))
+	gl.BindAttribLocation(program, nodes1Attrib, gl.Str("nodes1\x00"))
+	gl.BindAttribLocation(program, weights0Attrib, gl.Str("weights0\x00"))
+	gl.BindAttribLocation(program, weights1Attrib, gl.Str("weights1\x00"))
 	gl.LinkProgram(program)
 
 	var status int32
@@ -119,6 +155,7 @@ func newMeshProgram() *meshProgram {
 	gl.Uniform1i(gl.GetUniformLocation(program, gl.Str("diffuseMap\x00")), 0)
 	gl.Uniform1i(gl.GetUniformLocation(program, gl.Str("ormMap\x00")), 1)
 	gl.Uniform1i(gl.GetUniformLocation(program, gl.Str("teamColorMap\x00")), 2)
+	gl.Uniform1i(gl.GetUniformLocation(program, gl.Str("nodeMatrices\x00")), nodeMatricesUnit)
 	gl.UseProgram(0)
 
 	return &meshProgram{
@@ -174,17 +211,19 @@ type gpuLayer struct {
 	mask         uint32 // ORM texture tinting the diffuse by team colour; 0 = unmasked
 }
 
-// gpuGeoset is one geoset's VAO/VBO/IBO, its layers in material order, its
-// priority plane, whether it draws opaque (no depth write skipped) or
-// blended (drawn after every opaque geoset), and its index into the
-// model's geosets (so draw can look up its current alpha).
+// gpuGeoset is one geoset's VAO/VBO/IBO, its skinning VBOs (node ids and
+// weights, from Influences()), its layers in material order, its priority
+// plane, whether it draws opaque (no depth write skipped) or blended
+// (drawn after every opaque geoset), and its index into the model's
+// geosets (so draw can look up its current alpha).
 type gpuGeoset struct {
-	vao, vbo, ibo uint32
-	count         int32
-	layers        []gpuLayer
-	opaque        bool
-	priority      int32
-	index         int
+	vao, vbo, ibo      uint32
+	nodeVBO, weightVBO uint32
+	count              int32
+	layers             []gpuLayer
+	opaque             bool
+	priority           int32
+	index              int
 }
 
 // modelMesh is the GPU-side form of a model's geosets at one LOD, plus the
@@ -293,6 +332,23 @@ func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, l
 		gl.EnableVertexAttribArray(normalAttrib)
 		gl.EnableVertexAttribArray(uvAttrib) // pointer set per layer in draw, same VBO
 
+		influences := g.Influences()
+		gl.GenBuffers(1, &gg.nodeVBO)
+		gl.BindBuffer(gl.ARRAY_BUFFER, gg.nodeVBO)
+		gl.BufferData(gl.ARRAY_BUFFER, len(influences.Nodes)*4, gl.Ptr(influences.Nodes), gl.STATIC_DRAW)
+		gl.VertexAttribIPointerWithOffset(nodes0Attrib, 4, gl.UNSIGNED_INT, 32, 0)
+		gl.EnableVertexAttribArray(nodes0Attrib)
+		gl.VertexAttribIPointerWithOffset(nodes1Attrib, 4, gl.UNSIGNED_INT, 32, 16)
+		gl.EnableVertexAttribArray(nodes1Attrib)
+
+		gl.GenBuffers(1, &gg.weightVBO)
+		gl.BindBuffer(gl.ARRAY_BUFFER, gg.weightVBO)
+		gl.BufferData(gl.ARRAY_BUFFER, len(influences.Weights)*4, gl.Ptr(influences.Weights), gl.STATIC_DRAW)
+		gl.VertexAttribPointerWithOffset(weights0Attrib, 4, gl.FLOAT, false, 32, 0)
+		gl.EnableVertexAttribArray(weights0Attrib)
+		gl.VertexAttribPointerWithOffset(weights1Attrib, 4, gl.FLOAT, false, 32, 16)
+		gl.EnableVertexAttribArray(weights1Attrib)
+
 		gl.BindVertexArray(0)
 
 		gg.count = int32(len(g.Indices))
@@ -373,6 +429,8 @@ func (m *modelMesh) release() {
 	for _, g := range m.geosets {
 		gl.DeleteBuffers(1, &g.vbo)
 		gl.DeleteBuffers(1, &g.ibo)
+		gl.DeleteBuffers(1, &g.nodeVBO)
+		gl.DeleteBuffers(1, &g.weightVBO)
 		gl.DeleteVertexArrays(1, &g.vao)
 	}
 	for _, tex := range m.textures {
@@ -413,9 +471,11 @@ func filterGLState(f mdx.FilterMode) (blend bool, src, dst uint32, depthWrite bo
 // grey; a masked layer additionally tints its diffuse by team.color where
 // its ORM's alpha says so. A geoset whose current alpha (alphas[g.index])
 // is <= 0 is skipped entirely; otherwise each layer's uniform alpha is its
-// own alpha times the geoset's. Leaves depth testing, depth writes and
+// own alpha times the geoset's. Vertices are skinned on the GPU from
+// poseTexture (a texture buffer of node world matrices, see poseBuffer) and
+// each vertex's node ids/weights. Leaves depth testing, depth writes and
 // blending at their defaults.
-func (m *modelMesh) draw(prog *meshProgram, view, proj mat4, team teamTextures, alphas []float32) {
+func (m *modelMesh) draw(prog *meshProgram, view, proj mat4, team teamTextures, alphas []float32, poseTexture uint32) {
 	gl.Disable(gl.CULL_FACE)
 	gl.DepthFunc(gl.LEQUAL) // so a layer stacked on an earlier one at the same depth still passes
 
@@ -423,6 +483,9 @@ func (m *modelMesh) draw(prog *meshProgram, view, proj mat4, team teamTextures, 
 	viewProj := proj.mul(view)
 	gl.UniformMatrix4fv(prog.viewProjUniform, 1, false, &viewProj[0])
 	gl.UniformMatrix4fv(prog.viewUniform, 1, false, &view[0])
+
+	gl.ActiveTexture(gl.TEXTURE0 + nodeMatricesUnit)
+	gl.BindTexture(gl.TEXTURE_BUFFER, poseTexture)
 
 	gl.ActiveTexture(gl.TEXTURE0)
 	for _, g := range m.geosets {

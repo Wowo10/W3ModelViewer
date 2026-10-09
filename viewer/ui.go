@@ -24,6 +24,8 @@ type uiState struct {
 	framedName string // entry.Name the camera was last framed for
 	camera     orbitCamera
 
+	pose *poseBuffer
+
 	team teamTextures
 }
 
@@ -43,6 +45,7 @@ func newUIState(storage *casc.Storage, r root.Root) *uiState {
 		clearColor: [3]float32{0.10, 0.11, 0.13},
 		program:    newMeshProgram(),
 		meshFor:    -1,
+		pose:       newPoseBuffer(),
 		team:       teamTextures{player: -1},
 	}
 }
@@ -52,9 +55,11 @@ func newUIState(storage *casc.Storage, r root.Root) *uiState {
 // previous mesh first. The camera is only reframed when the new mesh is of a
 // different asset than the one last framed (by entry.Name, case-
 // insensitively), so switching editions of the same asset keeps the camera.
-func (ui *uiState) syncMesh() {
+// It reports whether the mesh was rebuilt, so syncPose knows to upload the
+// new mesh's pose even if model.pose happens to match the last one it saw.
+func (ui *uiState) syncMesh() bool {
 	if ui.models.loaded == ui.meshFor {
-		return
+		return false
 	}
 
 	ui.mesh.release()
@@ -64,6 +69,19 @@ func (ui *uiState) syncMesh() {
 		ui.framedName = ui.models.model.name
 	}
 	ui.meshFor = ui.models.loaded
+	return true
+}
+
+// syncPose uploads the selected model's current node matrices to the pose
+// buffer when the mesh was just rebuilt (rebuilt) or the pose changed
+// (model.pose differs from the last upload).
+func (ui *uiState) syncPose(rebuilt bool) {
+	pose := ui.models.model.pose
+	if !rebuilt && pose == ui.pose.pose {
+		return
+	}
+	ui.pose.upload(ui.models.model.matrices)
+	ui.pose.pose = pose
 }
 
 // syncTeam uploads the selected player's TeamColorNN/TeamGlowNN textures
@@ -102,6 +120,7 @@ func (ui *uiState) loadTeamTexture(name string, player int32) uint32 {
 func (ui *uiState) release() {
 	ui.mesh.release()
 	ui.program.release()
+	ui.pose.release()
 	if ui.team.player != -1 {
 		gl.DeleteTextures(1, &ui.team.color)
 		gl.DeleteTextures(1, &ui.team.glow)

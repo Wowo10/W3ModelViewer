@@ -184,7 +184,8 @@ func renderFrame(window *sdl.Window, ui *uiState) {
 	imgui.NewFrame()
 
 	ui.draw()
-	ui.syncMesh()
+	rebuilt := ui.syncMesh()
+	ui.syncPose(rebuilt)
 	ui.syncTeam()
 
 	imgui.Render()
@@ -196,7 +197,7 @@ func renderFrame(window *sdl.Window, ui *uiState) {
 
 	if h > 0 && len(ui.mesh.geosets) > 0 {
 		view, proj := ui.camera.matrices(float32(w) / float32(h))
-		ui.mesh.draw(ui.program, view, proj, ui.team, ui.models.model.alphas)
+		ui.mesh.draw(ui.program, view, proj, ui.team, ui.models.model.alphas, ui.pose.texture)
 	}
 
 	opengl3.RenderDrawData(imgui.CurrentDrawData())
