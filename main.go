@@ -29,7 +29,7 @@ import (
 var out io.Writer = os.Stdout
 
 func main() {
-	view := flag.Bool("view", false, "open the model viewer window")
+	view := flag.Bool("view", false, "no longer needed: the viewer opens when no output flag is given; with an output flag, -view also opens it afterwards")
 	verify := flag.Bool("verify", true, "cross-check idx entries against archive headers")
 	debug := flag.Bool("debug", false, "print debug output from the extract packages")
 	list := flag.Bool("list", false, "list every root file: path, size, content key, edition, overlays (tab-separated); other output goes to stderr")
@@ -40,11 +40,19 @@ func main() {
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
 	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), textures (each with its resolved .dds path and format, or \"unresolved\"), materials, sequences, default sequence, geoset vertex, triangle and alpha counts and a skinning summary of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
 	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
+	flag.Usage = func() {
+		w := flag.CommandLine.Output()
+		fmt.Fprintf(w, "Usage of %s:\n", os.Args[0])
+		fmt.Fprintln(w, "Opens the model viewer on wardata/. With an output flag (-list, -variants, -extract, -mdxinfo, -survey) it prints that instead and doesn't open the viewer, unless -view is also given.")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	if *list || *variants != "" || *mdxinfo != "" {
 		out = os.Stderr
 	}
+
+	output := *list || *variants != "" || *extract != "" || *mdxinfo != "" || *survey
 
 	idxPackages.DEBUG = *debug
 	blte.DEBUG = *debug
@@ -84,7 +92,7 @@ func main() {
 		surveyFiles(storage, r)
 	}
 
-	if *view {
+	if *view || !output {
 		runViewer(storage, r)
 	}
 }
