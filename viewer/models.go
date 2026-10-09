@@ -32,6 +32,7 @@ type selectedModel struct {
 	skeleton    mdx.Skeleton
 	pivots      int // len(mdx.Model.Pivots()), the matrices array size
 	sequences   []mdx.Sequence
+	seqLabels   []string // one per sequence, "name [start-end]", built once by loadModel
 	geosetAnims []mdx.GeosetAnim
 	globals     []uint32
 
@@ -382,6 +383,11 @@ func (p *modelPicker) loadModel(idx int) {
 		globals = m.GlobalSequences()
 	}
 
+	seqLabels := make([]string, len(sequences))
+	for i, s := range sequences {
+		seqLabels[i] = fmt.Sprintf("%s [%d-%d]", s.Name, int32(s.Start), int32(s.End))
+	}
+
 	p.model = selectedModel{
 		path:        entry.Path,
 		name:        entry.Name,
@@ -393,6 +399,7 @@ func (p *modelPicker) loadModel(idx int) {
 		skeleton:    skeleton,
 		pivots:      pivots,
 		sequences:   sequences,
+		seqLabels:   seqLabels,
 		geosetAnims: geosetAnims,
 		globals:     globals,
 	}
@@ -493,6 +500,7 @@ func (p *modelPicker) draw() {
 	}
 
 	p.drawModel()
+	p.drawAnimation()
 }
 
 // drawEditionsTable shows counts for every edition in p.group side by side,
