@@ -196,7 +196,7 @@ func renderFrame(window *sdl.Window, ui *uiState) {
 
 	if h > 0 && len(ui.mesh.geosets) > 0 {
 		view, proj := ui.camera.matrices(float32(w) / float32(h))
-		ui.mesh.draw(ui.program, view, proj, ui.team)
+		ui.mesh.draw(ui.program, view, proj, ui.team, ui.models.model.alphas)
 	}
 
 	opengl3.RenderDrawData(imgui.CurrentDrawData())

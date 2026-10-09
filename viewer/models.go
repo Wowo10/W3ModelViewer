@@ -45,7 +45,7 @@ const (
 type geosetLayer struct {
 	filter  mdx.FilterMode
 	shading uint32
-	alpha   float32 // layer alpha × the geoset's alpha in the default sequence
+	alpha   float32 // the layer's own alpha; scaled by the geoset's current alpha at draw time
 	source  layerSource
 	entry   root.Entry // resolved .dds when source == sourceTexture
 	uvSet   int        // the layer's coord id
@@ -57,7 +57,7 @@ type geosetLayer struct {
 
 // findGeosetLayers builds one geosetLayer per layer of materials[g.MaterialID],
 // or nil when g.MaterialID is out of range.
-func findGeosetLayers(res *texture.Resolver, model root.Entry, materials []mdx.Material, textures []mdx.Texture, g mdx.Geoset, geosetAlpha float32) []geosetLayer {
+func findGeosetLayers(res *texture.Resolver, model root.Entry, materials []mdx.Material, textures []mdx.Texture, g mdx.Geoset) []geosetLayer {
 	if g.MaterialID >= uint32(len(materials)) {
 		return nil
 	}
@@ -65,7 +65,7 @@ func findGeosetLayers(res *texture.Resolver, model root.Entry, materials []mdx.M
 	mLayers := materials[g.MaterialID].Layers
 	layers := make([]geosetLayer, len(mLayers))
 	for i, layer := range mLayers {
-		layers[i] = findGeosetLayer(res, model, textures, g, layer, geosetAlpha)
+		layers[i] = findGeosetLayer(res, model, textures, g, layer)
 	}
 	return layers
 }
@@ -76,11 +76,11 @@ func findGeosetLayers(res *texture.Resolver, model root.Entry, materials []mdx.M
 // bound), or grey with the reason it can't be drawn: no texture, another
 // replaceable id, an unresolved stored path, or a coord id outside the
 // geoset's UV sets.
-func findGeosetLayer(res *texture.Resolver, model root.Entry, textures []mdx.Texture, g mdx.Geoset, layer mdx.Layer, geosetAlpha float32) geosetLayer {
+func findGeosetLayer(res *texture.Resolver, model root.Entry, textures []mdx.Texture, g mdx.Geoset, layer mdx.Layer) geosetLayer {
 	l := geosetLayer{
 		filter:  layer.FilterMode,
 		shading: layer.ShadingFlags,
-		alpha:   layer.Alpha * geosetAlpha,
+		alpha:   layer.Alpha,
 		uvSet:   int(layer.CoordID),
 	}
 
@@ -313,7 +313,7 @@ func (p *modelPicker) loadModel(idx int) {
 			if g.MaterialID < uint32(len(materials)) {
 				priority[i] = materials[g.MaterialID].PriorityPlane
 			}
-			layers[i] = findGeosetLayers(p.resolver, entry, materials, textures, g, alphas[i])
+			layers[i] = findGeosetLayers(p.resolver, entry, materials, textures, g)
 		}
 	}
 
