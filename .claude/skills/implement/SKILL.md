@@ -66,7 +66,7 @@ imports this module, see the recipe in the `/plan` skill).
 4. For performance work, time both binaries over several runs and report the
    range. If a panic stops the run early, time throwaway copies in the
    scratchpad with that panic disabled — never edit the real code for this.
-5. The viewer (`-view`) needs a display; if you can't open it, say it was only
+5. The viewer (`go run .` with no output flag) needs a display; if you can't open it, say it was only
    compile-checked and leave `[owner]` criteria to the owner.
 
 ## Report
