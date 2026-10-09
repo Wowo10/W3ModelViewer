@@ -24,8 +24,8 @@ import (
 	"strings"
 )
 
-// out is where startup output goes; stdout by default, stderr with -list so
-// that -list output on stdout can be piped cleanly.
+// out is where -extract reports; stdout, or stderr when -list, -variants or
+// -mdxinfo own stdout.
 var out io.Writer = os.Stdout
 
 func main() {
@@ -96,9 +96,6 @@ func readBuildInfo() buildinfo.BuildInfo {
 	}
 
 	buildInfo := buildinfo.ReadBuildInfo(data)
-	// fmt.Println(buildInfo)
-	fmt.Fprintln(out, "Build Key:", buildInfo.GetBuildKey())
-	fmt.Fprintln(out, "CDN Key:", buildInfo.GetCDNKey())
 
 	return buildInfo
 }
@@ -110,9 +107,6 @@ func readBuildConfig(filename string) buildConfig.BuildConfig {
 	}
 
 	config := buildConfig.ReadBuildConfig(data)
-	cKey, eKey := config.GetEncoding()
-	fmt.Fprintln(out, "Client Key:", cKey)
-	fmt.Fprintln(out, "Server Key:", eKey)
 
 	return config
 }
@@ -131,15 +125,12 @@ func findEncodingPackage(storage *casc.Storage, ekey string) idxPackages.IndexEn
 		panic(fmt.Sprintf("Encoding key %x not found in index packages", ekeyDecoded[:9]))
 	}
 
-	fmt.Fprintf(out, "Encoding key %x found in archive %d at offset %d with size %d\n", ekeyDecoded[:9], packageEntry.Archive, packageEntry.Offset, packageEntry.Size)
-
 	return packageEntry
 }
 
 // readEncoding decodes the encoding file. With verify set, its MD5 must match the content key.
 func readEncoding(storage *casc.Storage, entry idxPackages.IndexEntry, ckey string) {
-	enc := storage.LoadEncoding(entry, [16]byte(decodeKey(ckey)))
-	fmt.Fprintln(out, "Encoding entries:", len(enc))
+	storage.LoadEncoding(entry, [16]byte(decodeKey(ckey)))
 }
 
 // findRootPackage resolves the root content key through the encoding file to its idx entry.
@@ -150,51 +141,18 @@ func findRootPackage(storage *casc.Storage, ckey string) idxPackages.IndexEntry 
 	}
 
 	ekey := encEntry.EKeys[0]
-	fmt.Fprintf(out, "Root key %s has encoding key %x, size %d\n", ckey, ekey, encEntry.Size)
 
 	packageEntry, exists := storage.LookupEKey(ekey[:])
 	if !exists {
 		panic(fmt.Sprintf("Root encoding key %x not found in index packages", ekey[:9]))
 	}
 
-	fmt.Fprintf(out, "Root key %x found in archive %d at offset %d with size %d\n", ekey[:9], packageEntry.Archive, packageEntry.Offset, packageEntry.Size)
-
 	return packageEntry
 }
 
-// readRoot reads and parses the root file, and prints the entry count and the
-// count per mod chain, largest first.
+// readRoot reads and parses the root file.
 func readRoot(storage *casc.Storage, ckey string) root.Root {
-	r := root.ReadRoot(storage.ReadByCKey([16]byte(decodeKey(ckey))))
-
-	fmt.Fprintln(out, "Root entries:", len(r.Entries))
-
-	counts := make(map[string]int)
-	for _, entry := range r.Entries {
-		counts[entry.ModChain]++
-	}
-
-	chains := make([]string, 0, len(counts))
-	for chain := range counts {
-		chains = append(chains, chain)
-	}
-	sort.Slice(chains, func(i, j int) bool {
-		if counts[chains[i]] != counts[chains[j]] {
-			return counts[chains[i]] > counts[chains[j]]
-		}
-		return chains[i] < chains[j]
-	})
-
-	fmt.Fprintln(out, "Root entries per mod chain:")
-	for _, chain := range chains {
-		name := chain
-		if name == "" {
-			name = "(none)"
-		}
-		fmt.Fprintf(out, "  %5d %s\n", counts[chain], name)
-	}
-
-	return r
+	return root.ReadRoot(storage.ReadByCKey([16]byte(decodeKey(ckey))))
 }
 
 // listFiles prints one line per root entry to stdout via writeEntry. With
