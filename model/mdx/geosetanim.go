@@ -18,11 +18,14 @@ type FloatTrack struct {
 	Keys           []FloatKey
 }
 
-// FloatKey is one key of a FloatTrack; in- and out-tangents are read (when
-// present) but not kept, as nothing needs them yet.
+// FloatKey is one key of a FloatTrack. InTan and OutTan are the tangent's
+// first component (the whole tangent for width-1 KGAO; the rest of a wider
+// track's tangent, e.g. KGAC, is skipped by readFloatTrack); both are zero
+// when Interpolation is InterpNone or InterpLinear (no tangents stored).
 type FloatKey struct {
-	Frame int32
-	Value float32
+	Frame         int32
+	Value         float32
+	InTan, OutTan float32
 }
 
 // GeosetAnims parses the model's GEOA chunk, if any, into geoset animations.
@@ -143,7 +146,9 @@ func GeosetAlphas(geosets int, anims []GeosetAnim, s Sequence, ok bool) []float3
 }
 
 // readFloatTrack parses a track body (after its tag) with values of the
-// given width (number of float32 per key, also used for tangents).
+// given width (number of float32 per key, also used for tangents). Only the
+// tangents' first component is kept (the whole tangent for width 1, i.e.
+// KGAO); the rest of a wider track's tangent (KGAC) is skipped.
 func readFloatTrack(r *reader, width int) FloatTrack {
 	count := r.u32()
 	t := FloatTrack{Interpolation: r.u32(), GlobalSequence: r.i32()}
@@ -163,12 +168,15 @@ func readFloatTrack(r *reader, width int) FloatTrack {
 		for w := 1; w < width; w++ {
 			r.f32()
 		}
-		t.Keys[i] = FloatKey{Frame: frame, Value: value}
+		k := FloatKey{Frame: frame, Value: value}
 
 		if t.Interpolation > 1 {
-			r.skip(4 * width) // in-tangent
-			r.skip(4 * width) // out-tangent
+			k.InTan = r.f32()
+			r.skip(4 * (width - 1))
+			k.OutTan = r.f32()
+			r.skip(4 * (width - 1))
 		}
+		t.Keys[i] = k
 	}
 
 	return t
