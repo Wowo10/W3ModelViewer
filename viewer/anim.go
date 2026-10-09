@@ -72,13 +72,14 @@ func (p *modelPicker) tick(dt float64) {
 	}
 }
 
-// drawAnimation shows the "Animation" window: a sequence combo and a frame
-// slider that re-pose the loaded model (via selectedModel.setPose) on
-// change, and a "start" button that resets the frame to the sequence's
-// start. With no model loaded, or no sequences, it says so instead.
+// drawAnimation shows the "Animation" window: a sequence combo, transport
+// controls (play/pause, start, loop, speed) and a frame slider, all of which
+// re-pose the loaded model (via selectedModel.setPose) on change. Playback
+// itself, between frames, is driven by tick. With no model loaded, or no
+// sequences, it says so instead.
 func (p *modelPicker) drawAnimation() {
 	imgui.SetNextWindowPosV(imgui.Vec2{X: 500, Y: 460}, imgui.CondFirstUseEver, imgui.Vec2{})
-	imgui.SetNextWindowSizeV(imgui.Vec2{X: 560, Y: 100}, imgui.CondFirstUseEver)
+	imgui.SetNextWindowSizeV(imgui.Vec2{X: 560, Y: 150}, imgui.CondFirstUseEver)
 	if imgui.Begin("Animation") {
 		m := &p.model
 		switch {
@@ -90,7 +91,9 @@ func (p *modelPicker) drawAnimation() {
 			imgui.Text("No sequences: bind pose")
 		default:
 			if imgui.ComboStrarr("sequence", &m.seq, m.seqLabels, int32(len(m.seqLabels))) {
-				m.setPose(m.seq, int32(m.sequences[m.seq].Start), 0)
+				start := int32(m.sequences[m.seq].Start)
+				p.play.frame = float64(start)
+				m.setPose(m.seq, start, uint32(uint64(p.play.global)))
 			}
 
 			s := m.sequences[m.seq]
@@ -99,13 +102,32 @@ func (p *modelPicker) drawAnimation() {
 				end = start // not seen in wardata; keep the slider usable
 			}
 
-			frame := m.frame
-			if imgui.SliderInt("frame", &frame, start, end) {
-				m.setPose(m.seq, frame, 0)
+			playLabel := "pause"
+			if !p.play.playing {
+				playLabel = "play"
 			}
+			if imgui.Button(playLabel + "###play") {
+				if !p.play.playing && !p.play.loop && int32(math.Floor(p.play.frame)) >= end {
+					p.play.frame = float64(start)
+				}
+				p.play.playing = !p.play.playing
+			}
+			imgui.SameLine()
 			if imgui.Button("start") {
-				m.setPose(m.seq, start, 0)
+				p.play.frame = float64(start)
+				m.setPose(m.seq, start, uint32(uint64(p.play.global)))
 			}
+			imgui.SameLine()
+			imgui.Checkbox("loop", &p.play.loop)
+
+			imgui.SliderFloatV("speed", &p.play.speed, 0.1, 2, "%.1fx", imgui.SliderFlagsAlwaysClamp)
+
+			frame := int32(math.Floor(p.play.frame))
+			if imgui.SliderInt("frame", &frame, start, end) {
+				p.play.frame = float64(frame)
+				m.setPose(m.seq, frame, uint32(uint64(p.play.global)))
+			}
+			p.play.scrubbing = imgui.IsItemActive()
 		}
 	}
 	imgui.End()

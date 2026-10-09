@@ -389,7 +389,8 @@ func (p *modelPicker) loadModel(idx int) {
 
 	seqLabels := make([]string, len(sequences))
 	for i, s := range sequences {
-		seqLabels[i] = fmt.Sprintf("%s [%d-%d]", s.Name, int32(s.Start), int32(s.End))
+		start, end := int32(s.Start), int32(s.End)
+		seqLabels[i] = fmt.Sprintf("%s (%d ms) [%d-%d]", s.Name, end-start, start, end)
 	}
 
 	p.model = selectedModel{
