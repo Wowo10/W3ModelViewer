@@ -363,7 +363,7 @@ func (p *modelPicker) loadModel(idx int) {
 	var sequences []mdx.Sequence
 	var geosetAnims []mdx.GeosetAnim
 	var globals []uint32
-	pivots := len(m.Pivots())
+	var pivots int
 
 	if len(geosets) > 0 {
 		materials := m.Materials()
@@ -378,6 +378,7 @@ func (p *modelPicker) loadModel(idx int) {
 		}
 
 		skeleton = mdx.NewSkeleton(m)
+		pivots = len(m.Pivots())
 		sequences = m.Sequences()
 		geosetAnims = m.GeosetAnims()
 		globals = m.GlobalSequences()
