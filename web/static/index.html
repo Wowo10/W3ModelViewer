@@ -3,8 +3,26 @@
 <head>
 	<meta charset="utf-8">
 	<title>modelViewer</title>
+	<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-	<p>The web viewer arrives in WEB-04.</p>
+	<div id="app">
+		<aside id="sidebar">
+			<input id="filter" type="text" placeholder="filter" autocomplete="off">
+			<select id="edition"></select>
+			<div id="count"></div>
+			<div id="tree">
+				<div id="tree-spacer">
+					<div id="tree-rows"></div>
+				</div>
+			</div>
+		</aside>
+		<main id="viewport">
+			<canvas id="canvas"></canvas>
+			<div id="model-panel"></div>
+			<div id="no-webgl" hidden>WebGL2 is not available in this browser.</div>
+		</main>
+	</div>
+	<script type="module" src="/js/main.js"></script>
 </body>
 </html>

@@ -1,0 +1,140 @@
+html, body {
+	height: 100%;
+	margin: 0;
+	background: #1a1c21;
+	color: #ddd;
+	font-family: system-ui, sans-serif;
+	font-size: 13px;
+}
+
+#app {
+	display: flex;
+	width: 100%;
+	height: 100%;
+}
+
+#sidebar {
+	width: 320px;
+	flex: none;
+	display: flex;
+	flex-direction: column;
+	border-right: 1px solid #333;
+	padding: 8px;
+	box-sizing: border-box;
+}
+
+#filter, #edition {
+	margin-bottom: 6px;
+	background: #24262c;
+	color: #ddd;
+	border: 1px solid #444;
+	padding: 4px;
+}
+
+#count {
+	margin-bottom: 6px;
+	color: #999;
+}
+
+#tree {
+	flex: 1;
+	overflow-y: auto;
+	position: relative;
+	border: 1px solid #333;
+}
+
+#tree-spacer {
+	position: relative;
+}
+
+#tree-rows {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+}
+
+.tree-row {
+	display: flex;
+	align-items: center;
+	white-space: nowrap;
+	cursor: pointer;
+	padding-right: 4px;
+}
+
+.tree-row:hover {
+	background: #2a2d35;
+}
+
+.tree-dir {
+	color: #bbb;
+}
+
+.tree-model.selected {
+	background: #3a4a6a;
+}
+
+#viewport {
+	position: relative;
+	flex: 1;
+}
+
+#canvas {
+	width: 100%;
+	height: 100%;
+	display: block;
+}
+
+#model-panel {
+	position: absolute;
+	top: 10px;
+	left: 10px;
+	max-width: 420px;
+	max-height: calc(100% - 20px);
+	overflow: auto;
+	background: rgba(10, 11, 13, 0.75);
+	border: 1px solid #333;
+	padding: 8px;
+	box-sizing: border-box;
+}
+
+.model-path {
+	word-break: break-all;
+	margin-bottom: 4px;
+}
+
+.model-editions {
+	margin-bottom: 4px;
+}
+
+.model-editions button {
+	margin-right: 4px;
+	margin-bottom: 4px;
+}
+
+.model-editions button.current {
+	font-weight: bold;
+}
+
+table.model-geosets {
+	border-collapse: collapse;
+	margin-top: 6px;
+}
+
+table.model-geosets th, table.model-geosets td {
+	border: 1px solid #333;
+	padding: 2px 6px;
+	text-align: right;
+}
+
+table.model-geosets th:first-child, table.model-geosets td:first-child {
+	text-align: left;
+}
+
+.model-geosets-total {
+	font-weight: bold;
+}
+
+#no-webgl {
+	padding: 16px;
+}
