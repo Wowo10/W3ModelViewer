@@ -55,7 +55,9 @@ test("mul: rotation and translation don't commute (column-major layout)", () => 
 });
 
 test("lookAt: eye to origin, target to -distance, up to +y (Z-up camera)", () => {
+	/** @type {[number, number, number]} */
 	const eye = [0, 5, 0];
+	/** @type {[number, number, number]} */
 	const target = [0, 0, 0];
 	const m = lookAt(eye, target, [0, 0, 1]);
 
