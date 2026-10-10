@@ -229,8 +229,10 @@ type modelPicker struct {
 
 	filter   string
 	edition  int32
-	visible  []int // indices into models matching filter and edition
-	selected int   // index into models, -1 = none
+	visible  []int     // indices into models matching filter and edition
+	shown    []bool    // indices into models, true when matching filter and edition
+	rows     []treeRow // the tree's rows currently visible, rebuilt by refresh and by toggling a directory
+	selected int       // index into models, -1 = none
 
 	loaded int // index into models of the model currently in model, -1 = none
 	model  selectedModel
@@ -321,21 +323,32 @@ func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
 	return p
 }
 
-// refresh recomputes visible from filter and edition.
+// refresh recomputes visible and shown from filter and edition, then the
+// tree's counts and rows.
 func (p *modelPicker) refresh() {
 	filter := strings.ToLower(p.filter)
 	edition := p.editions[p.edition]
 
 	p.visible = p.visible[:0]
+	if p.shown == nil {
+		p.shown = make([]bool, len(p.models))
+	}
 	for i, m := range p.models {
+		match := true
 		if filter != "" && !strings.Contains(m.lower, filter) {
-			continue
+			match = false
 		}
 		if edition != "all" && string(m.entry.Variant.Edition) != edition {
-			continue
+			match = false
 		}
-		p.visible = append(p.visible, i)
+		p.shown[i] = match
+		if match {
+			p.visible = append(p.visible, i)
+		}
 	}
+
+	p.tree.refresh(p.shown, filter != "")
+	p.rows = p.tree.rows(p.shown, filter != "")
 }
 
 // defaultSequenceIndex returns the index of the sequence mdx.DefaultSequence

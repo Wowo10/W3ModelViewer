@@ -101,6 +101,66 @@ func leafLabel(file string, v root.Variant) string {
 	return label + "]"
 }
 
+// refresh recomputes every directory's count from shown (indexed like
+// modelPicker.models) and rebuilds labels; while filtering, every
+// directory's filterOpen is forced true so a filter opens every matching
+// branch, leaving open (used with no filter) untouched.
+func (t *modelTree) refresh(shown []bool, filtering bool) {
+	for d := range t.dirs {
+		t.dirs[d].count = 0
+		if filtering {
+			t.dirs[d].filterOpen = true
+		}
+	}
+
+	for i, ok := range shown {
+		if !ok {
+			continue
+		}
+		for d := t.modelDir[i]; d != -1; d = t.dirs[d].parent {
+			t.dirs[d].count++
+		}
+	}
+
+	for d := 1; d < len(t.dirs); d++ {
+		dir := &t.dirs[d]
+		dir.label = fmt.Sprintf("%s (%d)###d%d", dir.name, dir.count, d)
+	}
+}
+
+// rows flattens the tree into the rows currently visible: every directory
+// with a non-zero count, and the shown models of every open one (open means
+// filterOpen while filtering, else open), subdirectories before models, in
+// a DFS from the root.
+func (t *modelTree) rows(shown []bool, filtering bool) []treeRow {
+	var rows []treeRow
+	var walk func(d, depth int)
+	walk = func(d, depth int) {
+		for _, c := range t.dirs[d].children {
+			cd := t.dirs[c]
+			if cd.count == 0 {
+				continue
+			}
+			rows = append(rows, treeRow{depth: depth, dir: c, model: -1})
+
+			open := cd.open
+			if filtering {
+				open = cd.filterOpen
+			}
+			if open {
+				walk(c, depth+1)
+			}
+		}
+		for _, m := range t.dirs[d].models {
+			if shown[m] {
+				rows = append(rows, treeRow{depth: depth, dir: -1, model: m})
+			}
+		}
+	}
+	walk(0, 0)
+	return rows
+}
+
 // sortChildren sorts dirs[d]'s children case-insensitively by name, and its
 // models case-insensitively by file name (stable, so same-named models keep
 // models' existing order).
