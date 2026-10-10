@@ -180,3 +180,30 @@ export async function getTexture(ref) {
 	const resp = await checkOK(await fetch(ref.url));
 	return resp.arrayBuffer();
 }
+
+/**
+ * poseURL builds the GET /api/pose?path=&seq=&frame=&global= URL for model
+ * at (seq, frame, global). seq is -1 for the bind pose.
+ * @param {Model} model
+ * @param {number} seq
+ * @param {number} frame
+ * @param {number} global
+ * @returns {string}
+ */
+export function poseURL(model, seq, frame, global) {
+	return `/api/pose?path=${encodeURIComponent(model.path)}&seq=${seq}&frame=${frame}&global=${global}`;
+}
+
+/**
+ * getPose fetches poseURL(model, seq, frame, global), the raw pose bytes
+ * (see decodePose in pose.js for the layout).
+ * @param {Model} model
+ * @param {number} seq
+ * @param {number} frame
+ * @param {number} global
+ * @returns {Promise<ArrayBuffer>}
+ */
+export async function getPose(model, seq, frame, global) {
+	const resp = await checkOK(await fetch(poseURL(model, seq, frame, global)));
+	return resp.arrayBuffer();
+}

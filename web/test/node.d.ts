@@ -1,5 +1,5 @@
 declare module "node:test" {
-	function test(name: string, fn: () => void): void;
+	function test(name: string, fn: () => void | Promise<void>): void;
 	export default test;
 }
 
