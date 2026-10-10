@@ -225,6 +225,7 @@ type modelPicker struct {
 	models   []modelEntry
 	byPath   map[string]int // models[byPath[path]].entry.Path == path
 	editions []string       // "all" followed by every edition that has a model
+	tree     modelTree      // directories grouped from models, built once
 
 	filter   string
 	edition  int32
@@ -313,6 +314,8 @@ func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
 			p.editions = append(p.editions, string(e))
 		}
 	}
+
+	p.tree = newModelTree(p.models)
 
 	p.refresh()
 	return p
