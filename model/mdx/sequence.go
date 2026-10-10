@@ -65,6 +65,68 @@ func (m Model) Sequences() []Sequence {
 	return seqs
 }
 
+// SequenceKey returns a normalised form of a sequence name for matching the
+// same animation across editions that name it differently (classic "Stand -
+// 1" vs HD/DE "Stand 1"): the lower-case ASCII letter runs joined by " ",
+// plus "#" and the last run of digits with leading zeros trimmed ("0" stays
+// "0"). A missing number is treated as "1" (so "Walk" matches "Walk 1"). It
+// returns "" when name has no ASCII letters, which never matches anything.
+func SequenceKey(name string) string {
+	var words []string
+	var word []byte
+	var lastDigits string
+	var digits []byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
+			word = append(word, c|0x20)
+			if len(digits) > 0 {
+				lastDigits = string(digits)
+				digits = nil
+			}
+		case c >= '0' && c <= '9':
+			digits = append(digits, c)
+			if len(word) > 0 {
+				words = append(words, string(word))
+				word = nil
+			}
+		default:
+			if len(word) > 0 {
+				words = append(words, string(word))
+				word = nil
+			}
+			if len(digits) > 0 {
+				lastDigits = string(digits)
+				digits = nil
+			}
+		}
+	}
+	if len(word) > 0 {
+		words = append(words, string(word))
+	}
+	if len(digits) > 0 {
+		lastDigits = string(digits)
+	}
+
+	if len(words) == 0 {
+		return ""
+	}
+
+	if lastDigits == "" {
+		lastDigits = "1"
+	} else {
+		trimmed := strings.TrimLeft(lastDigits, "0")
+		if trimmed == "" {
+			lastDigits = "0"
+		} else {
+			lastDigits = trimmed
+		}
+	}
+
+	return strings.Join(words, " ") + "#" + lastDigits
+}
+
 // DefaultSequence returns the first sequence whose name starts with "stand"
 // (case-insensitive), else the first sequence. It returns false when seqs is
 // empty.
