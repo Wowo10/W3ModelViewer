@@ -39,6 +39,32 @@ export const playerNames = [
  */
 
 /**
+ * @typedef {Object} ModelPanelControls
+ * @property {(alphas: Float32Array, seqName: string, frame: number) => void} updatePose
+ */
+
+/**
+ * renderingLine formats the "Rendering LOD ..." line in the desktop's three
+ * forms (viewer/models.go drawModel): no sequences, a sequence with
+ * nothing visible, or a sequence with some geosets shown.
+ * @param {Model} model
+ * @param {number} atLOD - geosets at model.lod
+ * @param {number} drawn - of those, how many have alpha > 0
+ * @param {string} seqName - "" for no sequences
+ * @param {number} frame
+ * @returns {string}
+ */
+function renderingLine(model, atLOD, drawn, seqName, frame) {
+	if (seqName === "") {
+		return `Rendering LOD ${model.lod}, no sequences: ${atLOD} of ${model.geosets.length} geosets`;
+	}
+	if (drawn === 0) {
+		return `Rendering LOD ${model.lod} in "${seqName}" at frame ${frame}: nothing visible`;
+	}
+	return `Rendering LOD ${model.lod} in "${seqName}" at frame ${frame}: ${drawn} of ${atLOD} geosets (${atLOD - drawn} hidden)`;
+}
+
+/**
  * variantLabel names an edition button, e.g. "classic" or
  * "reforged (teen)".
  * @param {Edition} e
@@ -64,10 +90,14 @@ function addLine(container, text) {
 }
 
 /**
- * renderModelPanel rebuilds container's contents for model.
+ * renderModelPanel rebuilds container's contents for model, with the
+ * "Rendering LOD ..." line and geoset alpha cells initially showing the
+ * default sequence's start (model.geosets[].alpha, as served). Returns
+ * controls.updatePose to refresh both from a real pose once one arrives.
  * @param {HTMLElement} container
  * @param {Model} model
  * @param {ModelPanelOptions} options
+ * @returns {ModelPanelControls}
  */
 export function renderModelPanel(container, model, options) {
 	container.textContent = "";
@@ -115,6 +145,11 @@ export function renderModelPanel(container, model, options) {
 	addLine(container, `Chunks: ${model.chunks}`);
 	addLine(container, `Geosets: ${model.geosets.length}`);
 
+	/** @type {HTMLElement | null} */
+	let renderingEl = null;
+	/** @type {HTMLElement[]} */
+	const alphaCells = [];
+
 	if (model.geosets.length > 0) {
 		let atLOD = 0;
 		let drawn = 0;
@@ -127,7 +162,12 @@ export function renderModelPanel(container, model, options) {
 				drawn++;
 			}
 		}
-		addLine(container, `Rendering LOD ${model.lod}: ${drawn} of ${atLOD} geosets (${atLOD - drawn} hidden)`);
+		const defaultSeqName = model.defaultSequence !== -1 ? model.sequences[model.defaultSequence].name : "";
+		const defaultFrame = model.defaultSequence !== -1 ? model.sequences[model.defaultSequence].start : 0;
+
+		renderingEl = document.createElement("div");
+		renderingEl.textContent = renderingLine(model, atLOD, drawn, defaultSeqName, defaultFrame);
+		container.appendChild(renderingEl);
 
 		const table = document.createElement("table");
 		table.className = "model-geosets";
@@ -140,11 +180,17 @@ export function renderModelPanel(container, model, options) {
 		let totalTriangles = 0;
 		model.geosets.forEach((g, i) => {
 			const tr = document.createElement("tr");
-			const layersText = g.layers.map((l) => l.label).join(" | ");
-			const td = document.createElement("td");
-			td.textContent = layersText;
-			tr.innerHTML = `<td>${i}</td><td>${g.material}</td><td>${g.lod}</td><td>${g.vertices}</td><td>${g.triangles}</td><td>${g.alpha.toFixed(2)}</td>`;
-			tr.appendChild(td);
+			tr.innerHTML = `<td>${i}</td><td>${g.material}</td><td>${g.lod}</td><td>${g.vertices}</td><td>${g.triangles}</td>`;
+
+			const alphaTd = document.createElement("td");
+			alphaTd.textContent = g.alpha.toFixed(2);
+			tr.appendChild(alphaTd);
+			alphaCells.push(alphaTd);
+
+			const layersTd = document.createElement("td");
+			layersTd.textContent = g.layers.map((l) => l.label).join(" | ");
+			tr.appendChild(layersTd);
+
 			tbody.appendChild(tr);
 			totalVertices += g.vertices;
 			totalTriangles += g.triangles;
@@ -178,4 +224,34 @@ export function renderModelPanel(container, model, options) {
 		table.appendChild(tbody);
 		container.appendChild(table);
 	}
+
+	/**
+	 * updatePose rewrites the "Rendering LOD ..." line and every geoset's
+	 * alpha cell from a real pose.
+	 * @param {Float32Array} alphas
+	 * @param {string} seqName
+	 * @param {number} frame
+	 */
+	function updatePose(alphas, seqName, frame) {
+		if (!renderingEl) {
+			return;
+		}
+
+		let atLOD = 0;
+		let drawn = 0;
+		model.geosets.forEach((g, i) => {
+			alphaCells[i].textContent = alphas[i].toFixed(2);
+			if (g.lod !== model.lod) {
+				return;
+			}
+			atLOD++;
+			if (alphas[i] > 0) {
+				drawn++;
+			}
+		});
+
+		renderingEl.textContent = renderingLine(model, atLOD, drawn, seqName, frame);
+	}
+
+	return { updatePose };
 }

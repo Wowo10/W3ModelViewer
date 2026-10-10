@@ -1,9 +1,12 @@
-// Wires the side panel, canvas and model panel together: fetches the model
-// list once, builds the tree, and on selection fetches /api/model +
-// /api/mesh, decodes the mesh, uploads its layers' textures and draws it
-// under an orbit camera.
+// Wires the side panel, canvas, model panel and animation panel together:
+// fetches the model list once, builds the tree, and on selection fetches
+// /api/model + /api/mesh, decodes the mesh, uploads its layers' textures,
+// and poses + draws it under an orbit camera. Playback (anim.js) drives a
+// single PoseScheduler (pose.js) that keeps at most one /api/pose request
+// in flight; a newly selected model is held as "pending" and only swapped
+// in once its first pose has arrived, so there's no bind-pose flash.
 
-import { getModels, getModel, getMesh, getTexture } from "./api.js";
+import { getModels, getModel, getMesh, getTexture, getPose } from "./api.js";
 import { buildTree, editionOptions, matchModels, refresh, rows } from "./tree.js";
 import { OrbitCamera, wheelSteps } from "./camera.js";
 import { decodeMesh, visibleBounds } from "./mesh.js";
@@ -12,6 +15,9 @@ import { Renderer } from "./renderer.js";
 import { uploadTexture } from "./texture.js";
 import { TreeView } from "./treeview.js";
 import { renderModelPanel } from "./modelpanel.js";
+import { renderAnimPanel } from "./animpanel.js";
+import { newPlayback, sequenceRange, advance, togglePlay, pickSequence, poseFrame } from "./anim.js";
+import { decodePose, PoseScheduler } from "./pose.js";
 
 /** @typedef {import("./api.js").ModelListEntry} ModelListEntry */
 /** @typedef {import("./api.js").Model} Model */
@@ -19,6 +25,10 @@ import { renderModelPanel } from "./modelpanel.js";
 /** @typedef {import("./texture.js").CompressionExts} CompressionExts */
 /** @typedef {import("./texture.js").UploadedTexture} UploadedTexture */
 /** @typedef {import("./modelpanel.js").TextureInfo} TextureInfo */
+/** @typedef {import("./modelpanel.js").ModelPanelControls} ModelPanelControls */
+/** @typedef {import("./mesh.js").DecodedGeoset} DecodedGeoset */
+/** @typedef {import("./pose.js").PoseRequest} PoseRequest */
+/** @typedef {import("./anim.js").SequenceRef} SequenceRef */
 
 async function main() {
 	const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("canvas"));
@@ -50,6 +60,8 @@ async function main() {
 	const spacerEl = /** @type {HTMLElement} */ (document.getElementById("tree-spacer"));
 	const rowsEl = /** @type {HTMLElement} */ (document.getElementById("tree-rows"));
 	const panelEl = /** @type {HTMLElement} */ (document.getElementById("model-panel"));
+	const animPanelEl = /** @type {HTMLElement} */ (document.getElementById("anim-panel"));
+	const hudEl = /** @type {HTMLElement} */ (document.getElementById("hud"));
 
 	const renderer = new Renderer(gl);
 	const camera = new OrbitCamera();
@@ -142,6 +154,204 @@ async function main() {
 
 	panelEl.textContent = "Select a model";
 
+	// --- Animation state (anim.js), shared across model/edition switches. ---
+	const play = newPlayback();
+	/** @type {Model | null} */
+	let currentModel = null;
+	let currentSeqIndex = -1;
+	/** @type {SequenceRef | null} */
+	let currentSeqRef = null;
+	/** @type {ModelPanelControls | null} */
+	let panelControls = null;
+	/** @type {(frame: number) => void} */
+	let animPanelUpdate = () => {};
+
+	/**
+	 * pending holds a fetched/decoded model not yet shown, waiting for its
+	 * first pose at (seqIndex, frame) so there's no bind-pose flash; the
+	 * rAF loop re-wants this same request every tick until it arrives.
+	 * @type {{model: Model, meshBuffer: ArrayBuffer, decoded: DecodedGeoset[], textures: Map<string, UploadedTexture>, textureInfos: TextureInfo[], seqIndex: number, frame: number} | null}
+	 */
+	let pending = null;
+
+	/** @type {number[]} */
+	const frameTimestamps = [];
+	/** @type {{t: number, latency: number}[]} */
+	const latencyReports = [];
+
+	/** @param {number} latencyMs */
+	function recordLatency(latencyMs) {
+		const t = performance.now();
+		latencyReports.push({ t, latency: latencyMs });
+		while (latencyReports.length > 0 && t - latencyReports[0].t > 1000) {
+			latencyReports.shift();
+		}
+	}
+
+	/** @param {number} now */
+	function updateHud(now) {
+		while (frameTimestamps.length > 0 && now - frameTimestamps[0] > 1000) {
+			frameTimestamps.shift();
+		}
+		const fps = frameTimestamps.length;
+		if (latencyReports.length === 0) {
+			hudEl.textContent = `${fps} fps`;
+			return;
+		}
+		const last = latencyReports[latencyReports.length - 1].latency;
+		const avg = latencyReports.reduce((s, r) => s + r.latency, 0) / latencyReports.length;
+		hudEl.textContent = `${fps} fps · pose ${last.toFixed(1)} ms (avg ${avg.toFixed(1)} ms)`;
+	}
+
+	/**
+	 * wantPose asks the scheduler for model's pose at (seqIndex, frame,
+	 * play.global): global is 0 when seqIndex is -1 (bind pose, ignored by
+	 * the server either way).
+	 * @param {Model} model
+	 * @param {number} seqIndex
+	 * @param {number} frame
+	 */
+	function wantPose(model, seqIndex, frame) {
+		const global = seqIndex === -1 ? 0 : Math.floor(play.global) >>> 0;
+		poseScheduler.want({ token: loadToken, model, seq: seqIndex, frame: Math.floor(frame), global });
+	}
+
+	/**
+	 * rebuildAnimPanel re-renders the animation panel for the current
+	 * model/sequence/playback state, replacing animPanelUpdate.
+	 */
+	function rebuildAnimPanel() {
+		animPanelUpdate = renderAnimPanel(animPanelEl, currentModel, currentSeqIndex, play, {
+			onSelectSequence(index) {
+				const model = currentModel;
+				currentSeqIndex = index;
+				if (model) {
+					currentSeqRef = { name: model.sequences[index].name, key: model.sequences[index].key };
+					play.frame = sequenceRange(model.sequences[index]).start;
+				}
+				rebuildAnimPanel();
+			},
+			onTogglePlay() {
+				const model = currentModel;
+				if (!model) {
+					return;
+				}
+				const { start, end } = sequenceRange(model.sequences[currentSeqIndex]);
+				togglePlay(play, start, end);
+				rebuildAnimPanel();
+			},
+			onStart() {
+				const model = currentModel;
+				if (!model) {
+					return;
+				}
+				play.frame = sequenceRange(model.sequences[currentSeqIndex]).start;
+			},
+			onLoopChange(loop) {
+				play.loop = loop;
+			},
+			onSpeedChange(speed) {
+				play.speed = speed;
+			},
+			onFrameInput(frame) {
+				play.frame = frame;
+			},
+			onScrubStart() {
+				play.scrubbing = true;
+			},
+			onScrubEnd() {
+				play.scrubbing = false;
+			},
+		});
+	}
+
+	/**
+	 * @param {import("./pose.js").DecodedPose} pose
+	 * @param {PoseRequest} req
+	 */
+	function swapInPending(pose, req) {
+		if (!pending) {
+			return;
+		}
+		const { model, meshBuffer, decoded, textures, textureInfos, seqIndex } = pending;
+		pending = null;
+
+		currentModel = model;
+		currentSeqIndex = seqIndex;
+		currentSeqRef = seqIndex !== -1 ? { name: model.sequences[seqIndex].name, key: model.sequences[seqIndex].key } : null;
+
+		renderer.setModel(meshBuffer, decoded, model, textures);
+		renderer.setPose(pose.matrices, pose.alphas);
+
+		const bounds = visibleBounds(decoded);
+		if (bounds !== null && model.name.toLowerCase() !== framedName) {
+			camera.frame(bounds.min, bounds.max);
+			framedName = model.name.toLowerCase();
+		}
+
+		panelControls = renderModelPanel(panelEl, model, {
+			onSelectEdition(path) {
+				const idx = models.findIndex((m) => m.path === path);
+				if (idx !== -1) {
+					selectModel(idx);
+				}
+			},
+			player: currentPlayer,
+			onSelectPlayer: selectPlayer,
+			textures: textureInfos,
+		});
+
+		const seqName = seqIndex !== -1 ? model.sequences[seqIndex].name : "";
+		panelControls.updatePose(pose.alphas, seqName, req.frame);
+
+		rebuildAnimPanel();
+	}
+
+	const poseScheduler = new PoseScheduler(
+		(req) => getPose(req.model, req.seq, req.frame, req.global),
+		(buffer, req, latencyMs) => {
+			recordLatency(latencyMs);
+
+			let pose;
+			try {
+				pose = decodePose(buffer, req.model);
+			} catch (err) {
+				console.error("main: decodePose:", err);
+				return;
+			}
+
+			if (pending && pending.model === req.model) {
+				swapInPending(pose, req);
+				return;
+			}
+			if (currentModel === req.model) {
+				renderer.setPose(pose.matrices, pose.alphas);
+				const seqName = currentSeqIndex !== -1 ? currentModel.sequences[currentSeqIndex].name : "";
+				if (panelControls) {
+					panelControls.updatePose(pose.alphas, seqName, req.frame);
+				}
+				animPanelUpdate(req.frame);
+			}
+			// Else: a response for a model that's neither pending nor current
+			// anymore (superseded twice over) - ignore it.
+		},
+		(err, req, latencyMs) => {
+			recordLatency(latencyMs);
+			console.error("main: pose:", err);
+			if (pending && pending.model === req.model) {
+				for (const t of pending.textures.values()) {
+					gl.deleteTexture(t.texture);
+				}
+				pending = null;
+				panelEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+				animPanelEl.textContent = "";
+			}
+			// Else: a steady-state pose error for the current model - logged
+			// above, keeping the last pose on screen.
+		},
+		() => performance.now(),
+	);
+
 	/**
 	 * collectTextureRefs gathers every distinct texture/mask TextureRef used
 	 * by model's lowest-LOD geosets' layers, keyed by content key, plus
@@ -183,7 +393,18 @@ async function main() {
 
 		const entry = models[modelIndex];
 		const token = ++loadToken;
+
+		// A model picked before this one finished loading never gets shown;
+		// free its textures now instead of waiting for its pose to resolve.
+		if (pending) {
+			for (const t of pending.textures.values()) {
+				gl.deleteTexture(t.texture);
+			}
+			pending = null;
+		}
+
 		panelEl.textContent = "Loading…";
+		animPanelEl.textContent = "";
 
 		try {
 			const model = await getModel(entry.path);
@@ -229,31 +450,25 @@ async function main() {
 			}
 
 			const decoded = decodeMesh(model, meshBuffer);
-			renderer.setModel(meshBuffer, decoded, model, textures);
 
-			const bounds = visibleBounds(decoded);
-			if (bounds !== null && model.name.toLowerCase() !== framedName) {
-				camera.frame(bounds.min, bounds.max);
-				framedName = model.name.toLowerCase();
-			}
+			const seqIndex = pickSequence(model, currentSeqRef);
+			const frame = seqIndex !== -1 ? sequenceRange(model.sequences[seqIndex]).start : 0;
+			play.frame = frame;
 
-			renderModelPanel(panelEl, model, {
-				onSelectEdition(path) {
-					const idx = models.findIndex((m) => m.path === path);
-					if (idx !== -1) {
-						selectModel(idx);
-					}
-				},
-				player: currentPlayer,
-				onSelectPlayer: selectPlayer,
-				textures: textureInfos,
-			});
+			// The rAF loop below re-wants this every tick until it resolves.
+			pending = { model, meshBuffer, decoded, textures, textureInfos, seqIndex, frame };
 		} catch (err) {
 			if (token !== loadToken) {
 				return;
 			}
 			renderer.releaseMesh();
+			currentModel = null;
+			currentSeqIndex = -1;
+			panelControls = null;
+			pending = null;
 			panelEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+			animPanelEl.textContent = "";
+			animPanelUpdate = () => {};
 		}
 	}
 
@@ -291,7 +506,33 @@ async function main() {
 	});
 	resizeObserver.observe(canvas);
 
-	function frame() {
+	/** @type {number | null} */
+	let lastTime = null;
+
+	/** @param {number} now */
+	function frame(now) {
+		frameTimestamps.push(now);
+
+		if (pending) {
+			// Keep re-asserting the same request every tick: if a steady-state
+			// request for the outgoing model was in flight when this was set,
+			// the scheduler sends whichever request is "wanted" once it
+			// settles, so this must stay "wanted" until it is sent and swapped
+			// in - a one-shot want() here could get overwritten and lost.
+			wantPose(pending.model, pending.seqIndex, pending.frame);
+		} else if (currentModel && currentSeqIndex !== -1) {
+			if (lastTime !== null) {
+				const { start, end } = sequenceRange(currentModel.sequences[currentSeqIndex]);
+				advance(play, (now - lastTime) / 1000, start, end);
+			}
+			const pf = poseFrame(play);
+			wantPose(currentModel, currentSeqIndex, pf.frame);
+			animPanelUpdate(pf.frame);
+		}
+		lastTime = now;
+
+		updateHud(now);
+
 		const aspect = canvas.height > 0 ? canvas.width / canvas.height : 1;
 		const { view, proj } = camera.matrices(aspect);
 		renderer.draw(view, proj, canvas.width, canvas.height);

@@ -151,6 +151,37 @@ table.model-textures td:first-child {
 	font-weight: bold;
 }
 
+#anim-panel {
+	position: absolute;
+	bottom: 10px;
+	left: 10px;
+	right: 10px;
+	background: rgba(10, 11, 13, 0.75);
+	border: 1px solid #333;
+	padding: 8px;
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+#anim-panel select {
+	background: #24262c;
+	color: #ddd;
+	border: 1px solid #444;
+}
+
+#hud {
+	position: absolute;
+	top: 10px;
+	right: 10px;
+	background: rgba(10, 11, 13, 0.75);
+	border: 1px solid #333;
+	padding: 4px 8px;
+	color: #999;
+}
+
 #no-webgl {
 	padding: 16px;
 }
