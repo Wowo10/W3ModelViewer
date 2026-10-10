@@ -404,6 +404,62 @@ func TestCacheEviction(t *testing.T) {
 	}
 }
 
+// TestLayersPerEdition checks that two root paths sharing a content key
+// (the HD and DE BloodWizard, which share ckey e199c088...) each get
+// layers resolved through their own mod chain, not whichever path's chain
+// first populated the content-key cache. A fresh Server per subtest keeps
+// the orders independent of each other and of the shared srv's cache.
+func TestLayersPerEdition(t *testing.T) {
+	const hd = "War3.w3mod:_HD.w3mod:Units/Creeps/BloodWizard/BloodWizard.mdx"
+	const de = "War3.w3mod:_DE.w3mod:Units/Creeps/BloodWizard/BloodWizard.mdx"
+
+	// checkChain asserts every resolved layer texture/mask of path's
+	// response is on wantChain's mod chain, not the other edition's.
+	checkChain := func(t *testing.T, ts *httptest.Server, path, wantChain, otherChain string) {
+		t.Helper()
+		var m modelResponse
+		if err := json.Unmarshal(getFrom(t, ts, "/api/model?path="+url.QueryEscape(path)), &m); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, g := range m.Geosets {
+			for _, l := range g.Layers {
+				for _, ref := range []*textureRef{l.Texture, l.Mask} {
+					if ref == nil {
+						continue
+					}
+					found = true
+					if !strings.Contains(ref.Path, wantChain) {
+						t.Errorf("%s: layer texture %q does not contain %q", path, ref.Path, wantChain)
+					}
+					if strings.Contains(ref.Path, otherChain) {
+						t.Errorf("%s: layer texture %q unexpectedly on %q's chain", path, ref.Path, otherChain)
+					}
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s: no resolved texture layer found to check", path)
+		}
+	}
+
+	t.Run("HD then DE", func(t *testing.T) {
+		s := New(srv.storage, srv.root)
+		ts := httptest.NewServer(s.Handler())
+		defer ts.Close()
+		checkChain(t, ts, hd, "_HD.w3mod", "_DE.w3mod")
+		checkChain(t, ts, de, "_DE.w3mod", "_HD.w3mod")
+	})
+
+	t.Run("DE then HD", func(t *testing.T) {
+		s := New(srv.storage, srv.root)
+		ts := httptest.NewServer(s.Handler())
+		defer ts.Close()
+		checkChain(t, ts, de, "_DE.w3mod", "_HD.w3mod")
+		checkChain(t, ts, hd, "_HD.w3mod", "_DE.w3mod")
+	})
+}
+
 func TestErrors(t *testing.T) {
 	cases := []struct {
 		name string

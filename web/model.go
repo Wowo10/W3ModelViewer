@@ -21,8 +21,9 @@ type loaded struct {
 	version     uint32
 	chunks      int
 	geosets     []mdx.Geoset
-	layers      [][]texture.Layer // one slice per geoset, built from this entry's mod chain
-	priority    []int32           // one per geoset, its material's priority plane
+	materials   []mdx.Material // resolving layers needs these plus the requesting entry's own mod chain
+	textures    []mdx.Texture
+	priority    []int32 // one per geoset, its material's priority plane
 	skeleton    mdx.Skeleton
 	objects     int // len(Pivots()), the pose's matrix count
 	sequences   []mdx.Sequence
@@ -46,15 +47,13 @@ func (s *Server) load(idx int) *loaded {
 	l := &loaded{version: m.Version, chunks: len(m.Chunks), geosets: geosets}
 
 	if len(geosets) > 0 {
-		materials := m.Materials()
-		textures := m.Textures()
-		l.layers = make([][]texture.Layer, len(geosets))
+		l.materials = m.Materials()
+		l.textures = m.Textures()
 		l.priority = make([]int32, len(geosets))
 		for i, g := range geosets {
-			if g.MaterialID < uint32(len(materials)) {
-				l.priority[i] = materials[g.MaterialID].PriorityPlane
+			if g.MaterialID < uint32(len(l.materials)) {
+				l.priority[i] = l.materials[g.MaterialID].PriorityPlane
 			}
-			l.layers[i] = s.resolver.GeosetLayers(entry, materials, textures, g)
 		}
 
 		l.skeleton = mdx.NewSkeleton(m)
@@ -68,6 +67,19 @@ func (s *Server) load(idx int) *loaded {
 	l.mesh, l.meshOffsets = buildMesh(geosets, l.lod)
 
 	return l
+}
+
+// layersFor resolves m's geoset layers through entry's own mod chain. m is
+// cached by content key and shared across every root path with that
+// content key, but resolved texture paths depend on which path's mod chain
+// is used, so layers are never cached — only the content they're built
+// from (materials, textures) is.
+func (s *Server) layersFor(entry root.Entry, m *loaded) [][]texture.Layer {
+	layers := make([][]texture.Layer, len(m.geosets))
+	for i, g := range m.geosets {
+		layers[i] = s.resolver.GeosetLayers(entry, m.materials, m.textures, g)
+	}
+	return layers
 }
 
 // getLoaded returns the cached parsed model for entry's content key,
@@ -172,15 +184,16 @@ func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
 	}
 	entry := s.models[idx]
 	m := s.getLoaded(idx)
+	layers := s.layersFor(entry, m)
 
 	defSeq := mdx.DefaultSequenceIndex(m.sequences)
-	ok2 := defSeq != -1
+	hasSeq := defSeq != -1
 	var at mdx.AnimTime
-	if ok2 {
+	if hasSeq {
 		seq := m.sequences[defSeq]
 		at = mdx.AnimTime{Sequence: seq, Frame: seq.Start, Global: 0}
 	}
-	alphas := mdx.GeosetAlphasAtTime(len(m.geosets), m.geosetAnims, m.globals, at, ok2)
+	alphas := mdx.GeosetAlphasAtTime(len(m.geosets), m.geosetAnims, m.globals, at, hasSeq)
 
 	resp := modelResponse{
 		Path:            entry.Path,
@@ -195,19 +208,14 @@ func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
 		Geosets:         make([]geosetRef, len(m.geosets)),
 		Sequences:       make([]sequenceRef, len(m.sequences)),
 		DefaultSequence: defSeq,
-		GlobalSequences: m.globals,
+		GlobalSequences: uint32sOrEmpty(m.globals),
 		Mesh:            meshRef{URL: "/api/mesh?path=" + url.QueryEscape(entry.Path), Size: len(m.mesh)},
 	}
 
 	for i, g := range m.geosets {
-		layers := make([]layerRef, len(m.layers[i]))
-		for j, l := range m.layers[i] {
-			layers[j] = s.layerRefFor(l)
-		}
-
-		var mesh *meshOffsets
-		if m.meshOffsets[i] != nil {
-			mesh = m.meshOffsets[i]
+		layerRefs := make([]layerRef, len(layers[i]))
+		for j, l := range layers[i] {
+			layerRefs[j] = s.layerRefFor(l)
 		}
 
 		resp.Geosets[i] = geosetRef{
@@ -217,8 +225,8 @@ func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
 			Triangles: g.TriangleCount(),
 			Priority:  m.priority[i],
 			Alpha:     alphas[i],
-			Layers:    layers,
-			Mesh:      mesh,
+			Layers:    layerRefs,
+			Mesh:      m.meshOffsets[i],
 		}
 		resp.Vertices += g.VertexCount()
 		resp.Triangles += g.TriangleCount()
