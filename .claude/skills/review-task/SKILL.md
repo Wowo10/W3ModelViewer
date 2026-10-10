@@ -28,6 +28,9 @@ Run everything from the repo root; put binaries and output in the session
 scratchpad.
 
 1. **Gate:** `gofmt -l .` is empty, `go vet ./...` and `go build ./...` pass.
+   When `web/` changes (or once `web/package.json` exists), `npm --prefix web
+   ci` if `web/node_modules` is missing, then `npm --prefix web run check`
+   passes.
 2. **Acceptance criteria:** verify each one yourself by running the program on
    `wardata`. Don't trust the ticks or the evidence in Implementation notes;
    re-run. `[owner]` criteria: say they are left to the owner.

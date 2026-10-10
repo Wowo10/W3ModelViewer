@@ -51,6 +51,9 @@ binaries, probes and output files, not `/tmp` or the repo (for a probe that
 imports this module, see the recipe in the `/plan` skill).
 
 1. `gofmt -l .` prints nothing, `go vet ./...` passes, `go build ./...` succeeds.
+   When `web/` changes (or once `web/package.json` exists), `npm --prefix web
+   ci` if `web/node_modules` is missing, then `npm --prefix web run check`
+   passes.
 2. Compare the program's output before and after the change:
    - Build the new binary: `go build -o <scratchpad>/new .`
    - Build the old binary from a worktree of the base, leaving the working
