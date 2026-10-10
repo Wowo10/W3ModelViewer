@@ -159,6 +159,29 @@ func TestModel(t *testing.T) {
 	}
 }
 
+// TestGlobalSequencesEmpty checks that a model with no GLBS chunk gets
+// globalSequences: [] rather than null, matching api.js's number[] type.
+func TestGlobalSequencesEmpty(t *testing.T) {
+	path := "War3.w3mod:Abilities/Spells/Demon/DarkConversion/ZombifyTarget.mdx"
+	body := getBody(t, "/api/model?path="+url.QueryEscape(path))
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if string(raw["globalSequences"]) == "null" {
+		t.Error("globalSequences: got null, want []")
+	}
+
+	var m modelResponse
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.GlobalSequences == nil {
+		t.Error("GlobalSequences: got nil, want non-nil empty slice")
+	}
+}
+
 func checkOffset(t *testing.T, geoset int, field string, offset, size, bufLen int) {
 	t.Helper()
 	if offset < 0 || offset+size > bufLen {
@@ -500,19 +523,44 @@ func hexFootmanCKey(t *testing.T) string {
 }
 
 func TestHostCheck(t *testing.T) {
-	req, err := http.NewRequest("GET", ts.URL+"/api/models", nil)
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		host string
+		want int
+	}{
+		{"example.com", http.StatusForbidden},
+		{"localhost:8080", http.StatusOK},
+		{"[::1]", http.StatusOK}, // bracketed loopback IPv6 with no port
 	}
-	req.Host = "example.com"
+	for _, c := range cases {
+		t.Run(c.host, func(t *testing.T) {
+			req, err := http.NewRequest("GET", ts.URL+"/api/models", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = c.host
 
-	resp, err := http.DefaultClient.Do(req)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != c.want {
+				t.Errorf("status: got %d, want %d", resp.StatusCode, c.want)
+			}
+		})
+	}
+}
+
+// TestMethodNotAllowed checks that a non-GET request to an API path gets
+// 405, not the catch-all file server's 404.
+func TestMethodNotAllowed(t *testing.T) {
+	resp, err := http.Post(ts.URL+"/api/models", "text/plain", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("status: got %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want 405", resp.StatusCode)
 	}
 }
 

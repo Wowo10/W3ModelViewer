@@ -200,14 +200,24 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/models", s.handleModels)
-	mux.HandleFunc("GET /api/model", s.handleModel)
-	mux.HandleFunc("GET /api/mesh", s.handleMesh)
-	mux.HandleFunc("GET /api/texture", s.handleTexture)
-	mux.HandleFunc("GET /api/pose", s.handlePose)
+	registerAPI(mux, "/api/models", s.handleModels)
+	registerAPI(mux, "/api/model", s.handleModel)
+	registerAPI(mux, "/api/mesh", s.handleMesh)
+	registerAPI(mux, "/api/texture", s.handleTexture)
+	registerAPI(mux, "/api/pose", s.handlePose)
 	mux.Handle("/", http.FileServerFS(static))
 
 	return loopbackOnly(mux)
+}
+
+// registerAPI registers handler for GET path, and a 405 for every other
+// method on path (the bare pattern, less specific than "GET "+path, only
+// matches when the method doesn't).
+func registerAPI(mux *http.ServeMux, path string, handler http.HandlerFunc) {
+	mux.HandleFunc("GET "+path, handler)
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	})
 }
 
 // loopbackOnly rejects requests whose Host isn't localhost or a loopback
@@ -218,6 +228,8 @@ func loopbackOnly(next http.Handler) http.Handler {
 		host := r.Host
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
+		} else {
+			host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 		}
 		if host != "localhost" && !net.ParseIP(host).IsLoopback() {
 			http.Error(w, fmt.Sprintf("host %q is not localhost or a loopback address", r.Host), http.StatusForbidden)

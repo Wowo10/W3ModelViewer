@@ -161,6 +161,15 @@ func overlaysOrEmpty(overlays []string) []string {
 	return overlays
 }
 
+// uint32sOrEmpty returns globals, or an empty (never nil) slice, so it
+// marshals to [] rather than null.
+func uint32sOrEmpty(globals []uint32) []uint32 {
+	if globals == nil {
+		return []uint32{}
+	}
+	return globals
+}
+
 // modelListEntryFor builds a modelListEntry for a .mdx root entry.
 func modelListEntryFor(entry root.Entry) modelListEntry {
 	return modelListEntry{

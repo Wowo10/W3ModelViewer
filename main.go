@@ -50,7 +50,9 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	web.CheckAddr(*addr)
+	if *webFlag {
+		web.CheckAddr(*addr)
+	}
 
 	if *list || *variants != "" || *mdxinfo != "" {
 		out = os.Stderr

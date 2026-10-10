@@ -44,10 +44,10 @@ func (s *Server) handlePose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok2 := seq != -1
+	hasSeq := seq != -1
 	var at mdx.AnimTime
 	var matrices []mdx.Mat4
-	if ok2 {
+	if hasSeq {
 		at = mdx.AnimTime{Sequence: m.sequences[seq], Frame: uint32(frame), Global: uint32(global)}
 		matrices = m.skeleton.WorldMatrices(at)
 	} else {
@@ -56,7 +56,7 @@ func (s *Server) handlePose(w http.ResponseWriter, r *http.Request) {
 			matrices[i] = identityMat4
 		}
 	}
-	alphas := mdx.GeosetAlphasAtTime(len(m.geosets), m.geosetAnims, m.globals, at, ok2)
+	alphas := mdx.GeosetAlphasAtTime(len(m.geosets), m.geosetAnims, m.globals, at, hasSeq)
 
 	buf := make([]byte, 8+16*4*len(matrices)+4*len(alphas))
 	binary.LittleEndian.PutUint32(buf[0:], uint32(len(matrices)))
