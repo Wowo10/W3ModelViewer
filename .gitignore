@@ -1,5 +1,6 @@
 **/wardata/**
 imgui.ini
+web/node_modules/
 .claude/*
 !.claude/skills/
 roadmap/
