@@ -26,8 +26,8 @@ type selectedModel struct {
 	version  uint32
 	chunks   int
 	geosets  []mdx.Geoset
-	priority []int32         // one per geoset, its material's priority plane
-	layers   [][]geosetLayer // one slice per geoset, one geosetLayer per material layer
+	priority []int32           // one per geoset, its material's priority plane
+	layers   [][]texture.Layer // one slice per geoset, one texture.Layer per material layer
 
 	skeleton    mdx.Skeleton
 	pivots      int // len(mdx.Model.Pivots()), the matrices array size
@@ -78,140 +78,6 @@ func (m *selectedModel) setPose(seq, frame int32, global uint32) {
 	}
 
 	m.pose++
-}
-
-// layerSource is what a layer samples.
-type layerSource int
-
-const (
-	sourceGrey      layerSource = iota // flat grey; label says why
-	sourceTexture                      // entry
-	sourceTeamColor                    // replaceable 1
-	sourceTeamGlow                     // replaceable 2
-)
-
-// geosetLayer is how one material layer of a geoset is drawn.
-type geosetLayer struct {
-	filter  mdx.FilterMode
-	shading uint32
-	alpha   float32 // the layer's own alpha; scaled by the geoset's current alpha at draw time
-	source  layerSource
-	entry   root.Entry // resolved .dds when source == sourceTexture
-	uvSet   int        // the layer's coord id
-	flags   uint32     // TEXS flags: bit 0 wrap width, bit 1 wrap height
-	label   string     // "<filter>: <path | team colour | team glow | grey: reason>"
-	mask    root.Entry // resolved ORM .dds when masked
-	masked  bool       // slot 4 is replaceable 1 (team colour) and the slot 2 ORM resolved
-}
-
-// findGeosetLayers builds one geosetLayer per layer of materials[g.MaterialID],
-// or nil when g.MaterialID is out of range.
-func findGeosetLayers(res *texture.Resolver, model root.Entry, materials []mdx.Material, textures []mdx.Texture, g mdx.Geoset) []geosetLayer {
-	if g.MaterialID >= uint32(len(materials)) {
-		return nil
-	}
-
-	mLayers := materials[g.MaterialID].Layers
-	layers := make([]geosetLayer, len(mLayers))
-	for i, layer := range mLayers {
-		layers[i] = findGeosetLayer(res, model, textures, g, layer)
-	}
-	return layers
-}
-
-// findGeosetLayer builds one geosetLayer from layer's first texture (slot 0
-// in every layer seen in wardata): a resolved stored path, team colour/glow
-// (replaceable 1/2; drawn grey until the team colour/glow textures are
-// bound), or grey with the reason it can't be drawn: no texture, another
-// replaceable id, an unresolved stored path, or a coord id outside the
-// geoset's UV sets.
-func findGeosetLayer(res *texture.Resolver, model root.Entry, textures []mdx.Texture, g mdx.Geoset, layer mdx.Layer) geosetLayer {
-	l := geosetLayer{
-		filter:  layer.FilterMode,
-		shading: layer.ShadingFlags,
-		alpha:   layer.Alpha,
-		uvSet:   int(layer.CoordID),
-	}
-
-	if len(layer.Textures) == 0 {
-		l.label = fmt.Sprintf("%s: grey: no texture", layer.FilterMode)
-		return l
-	}
-
-	id := layer.Textures[0].ID
-	if id >= uint32(len(textures)) {
-		l.label = fmt.Sprintf("%s: grey: no texture", layer.FilterMode)
-		return l
-	}
-
-	t := textures[id]
-	if t.Path == "" && t.ReplaceableID != 1 && t.ReplaceableID != 2 {
-		l.label = fmt.Sprintf("%s: grey: replaceable %d", layer.FilterMode, t.ReplaceableID)
-		return l
-	}
-	if layer.CoordID >= uint32(len(g.UVs)) {
-		l.label = fmt.Sprintf("%s: grey: no UV set %d", layer.FilterMode, layer.CoordID)
-		return l
-	}
-	l.flags = t.Flags
-
-	switch {
-	case t.Path == "" && t.ReplaceableID == 1:
-		l.source = sourceTeamColor
-		l.label = fmt.Sprintf("%s: team colour", layer.FilterMode)
-	case t.Path == "" && t.ReplaceableID == 2:
-		l.source = sourceTeamGlow
-		l.label = fmt.Sprintf("%s: team glow", layer.FilterMode)
-	default:
-		resolved, ok := res.Resolve(model, t)
-		if !ok {
-			l.label = fmt.Sprintf("%s: grey: unresolved %s", layer.FilterMode, t.Path)
-			return l
-		}
-		l.source = sourceTexture
-		l.entry = resolved
-		l.label = fmt.Sprintf("%s: %s", layer.FilterMode, resolved.Path)
-
-		if mask, ok := findTeamColorMask(res, model, textures, layer); ok {
-			l.mask = mask
-			l.masked = true
-			l.label += " + team colour"
-		}
-	}
-
-	return l
-}
-
-// findTeamColorMask looks for an HD layer's slot 4 (team colour mask) and
-// slot 2 (ORM) textures, returning the ORM's resolved root entry when slot 4
-// is a replaceable id 1 texture and the slot 2 texture has a stored path
-// that resolves.
-func findTeamColorMask(res *texture.Resolver, model root.Entry, textures []mdx.Texture, layer mdx.Layer) (root.Entry, bool) {
-	var haveMask bool
-	var ormID uint32
-	var haveORM bool
-
-	for _, lt := range layer.Textures {
-		switch lt.Slot {
-		case 4:
-			if lt.ID < uint32(len(textures)) {
-				t := textures[lt.ID]
-				haveMask = t.Path == "" && t.ReplaceableID == 1
-			}
-		case 2:
-			ormID, haveORM = lt.ID, true
-		}
-	}
-
-	if !haveMask || !haveORM || ormID >= uint32(len(textures)) {
-		return root.Entry{}, false
-	}
-
-	orm := textures[ormID]
-	if orm.Path == "" {
-		return root.Entry{}, false
-	}
-	return res.Resolve(model, orm)
 }
 
 // modelPicker lists every .mdx root entry with a text filter and an edition
@@ -276,7 +142,7 @@ func countGeosets(version uint32, geosets []mdx.Geoset) modelCounts {
 	}
 
 	lods := map[uint32]bool{}
-	c.lod = lowestLOD(geosets)
+	c.lod = mdx.LowestLOD(geosets)
 	for _, g := range geosets {
 		lods[g.LOD] = true
 		c.vertices += g.VertexCount()
@@ -353,21 +219,6 @@ func (p *modelPicker) refresh() {
 	p.rows = p.tree.rows(p.shown, p.filtering)
 }
 
-// defaultSequenceIndex returns the index of the sequence mdx.DefaultSequence
-// picks, or -1 when seqs is empty.
-func defaultSequenceIndex(seqs []mdx.Sequence) int32 {
-	def, ok := mdx.DefaultSequence(seqs)
-	if !ok {
-		return -1
-	}
-	for i, s := range seqs {
-		if s == def {
-			return int32(i)
-		}
-	}
-	return -1
-}
-
 // sequenceIndexByName returns the index of the first sequence whose name
 // matches name case-insensitively, else the first whose normalised name
 // (mdx.SequenceKey) matches, or -1 when neither does (including when name is
@@ -406,7 +257,7 @@ func (p *modelPicker) loadModel(idx int) {
 	geosets := m.Geosets()
 
 	var priority []int32
-	var layers [][]geosetLayer
+	var layers [][]texture.Layer
 	var skeleton mdx.Skeleton
 	var sequences []mdx.Sequence
 	var geosetAnims []mdx.GeosetAnim
@@ -417,12 +268,12 @@ func (p *modelPicker) loadModel(idx int) {
 		materials := m.Materials()
 		textures := m.Textures()
 		priority = make([]int32, len(geosets))
-		layers = make([][]geosetLayer, len(geosets))
+		layers = make([][]texture.Layer, len(geosets))
 		for i, g := range geosets {
 			if g.MaterialID < uint32(len(materials)) {
 				priority[i] = materials[g.MaterialID].PriorityPlane
 			}
-			layers[i] = findGeosetLayers(p.resolver, entry, materials, textures, g)
+			layers[i] = p.resolver.GeosetLayers(entry, materials, textures, g)
 		}
 
 		skeleton = mdx.NewSkeleton(m)
@@ -456,7 +307,7 @@ func (p *modelPicker) loadModel(idx int) {
 
 	seq := sequenceIndexByName(sequences, previousSequence)
 	if seq == -1 {
-		seq = defaultSequenceIndex(sequences)
+		seq = mdx.DefaultSequenceIndex(sequences)
 	}
 	start := int32(0)
 	if seq != -1 {
@@ -686,7 +537,7 @@ func (p *modelPicker) drawModel() {
 			}
 
 			if len(m.geosets) > 0 {
-				lod := lowestLOD(m.geosets)
+				lod := mdx.LowestLOD(m.geosets)
 				atLOD, drawn := 0, 0
 				for i, g := range m.geosets {
 					if g.LOD != lod {
@@ -738,7 +589,7 @@ func (p *modelPicker) drawModel() {
 						imgui.TableNextColumn()
 						labels := make([]string, len(m.layers[i]))
 						for j, l := range m.layers[i] {
-							labels[j] = l.label
+							labels[j] = l.Label
 						}
 						imgui.TextUnformatted(strings.Join(labels, " | "))
 

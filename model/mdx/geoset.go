@@ -22,6 +22,21 @@ type Geoset struct {
 	Skin         []uint16 // SKIN: per vertex 4 indices into GroupNodes, then 4 weights (sum 255); nil when absent
 }
 
+// LowestLOD returns the lowest LOD value present among geosets, or 0 if
+// there are none.
+func LowestLOD(geosets []Geoset) uint32 {
+	if len(geosets) == 0 {
+		return 0
+	}
+	lod := geosets[0].LOD
+	for _, g := range geosets[1:] {
+		if g.LOD < lod {
+			lod = g.LOD
+		}
+	}
+	return lod
+}
+
 // VertexCount returns the number of vertices in the geoset.
 func (g Geoset) VertexCount() int { return len(g.Positions) / 3 }
 

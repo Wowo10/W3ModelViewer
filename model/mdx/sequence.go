@@ -127,6 +127,21 @@ func SequenceKey(name string) string {
 	return strings.Join(words, " ") + "#" + lastDigits
 }
 
+// DefaultSequenceIndex returns the index of the sequence DefaultSequence
+// picks, or -1 when seqs is empty.
+func DefaultSequenceIndex(seqs []Sequence) int32 {
+	def, ok := DefaultSequence(seqs)
+	if !ok {
+		return -1
+	}
+	for i, s := range seqs {
+		if s == def {
+			return int32(i)
+		}
+	}
+	return -1
+}
+
 // DefaultSequence returns the first sequence whose name starts with "stand"
 // (case-insensitive), else the first sequence. It returns false when seqs is
 // empty.

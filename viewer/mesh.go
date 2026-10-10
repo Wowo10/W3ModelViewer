@@ -196,13 +196,13 @@ func compileShader(xtype uint32, src string) uint32 {
 }
 
 // gpuLayer is one material layer of a gpuGeoset, ready to draw: its texture
-// (0 = grey, bound at draw time for sourceTeamColor/sourceTeamGlow instead),
+// (0 = grey, bound at draw time for texture.TeamColor/texture.TeamGlow instead),
 // filter mode and shading flags for GL state, its alpha (already scaled by
 // the geoset's alpha), wrap mode, and the byte offset of its UV set's block
 // in the geoset's VBO.
 type gpuLayer struct {
 	texture      uint32
-	source       layerSource
+	source       texture.Source
 	filter       mdx.FilterMode
 	shading      uint32
 	alpha        float32
@@ -238,38 +238,23 @@ type modelMesh struct {
 	textures map[[16]byte]uint32
 }
 
-// lowestLOD returns the lowest LOD value present among geosets, or 0 if
-// there are none.
-func lowestLOD(geosets []mdx.Geoset) uint32 {
-	if len(geosets) == 0 {
-		return 0
-	}
-	lod := geosets[0].LOD
-	for _, g := range geosets[1:] {
-		if g.LOD < lod {
-			lod = g.LOD
-		}
-	}
-	return lod
-}
-
 // uploadMesh uploads every geoset at the model's lowest LOD (visible or not,
 // since per-pose alpha can show any of them later) to VAO/VBO/IBO pairs:
 // position+normal (zero-filled when the geoset has no normals) interleaved,
 // followed by each of the geoset's UV sets as its own packed block, in a
-// single vertex buffer per geoset. lowestLOD is computed over every geoset,
-// visible or not, so hiding geosets never changes which LOD is rendered.
-// The bounds (mesh.min/max, mesh.bounded) only cover geosets with alphas[i]
-// > 0, so the camera frames what's actually shown at upload time. For each
-// layer whose source is sourceTexture, its DDS is read through storage and
-// uploaded once per content key, shared across geosets and layers; a masked
-// layer's ORM is likewise uploaded once per content key, but only when its
-// DDS is DXT5 — otherwise the layer draws unmasked. Geosets are returned
-// opaque first (first layer's filter none/transparent, or no layers), then
-// blended, each group ordered by priority plane ascending then geoset
-// index. GL must be current.
-func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, layers [][]geosetLayer, priority []int32) modelMesh {
-	lod := lowestLOD(geosets)
+// single vertex buffer per geoset. mdx.LowestLOD is computed over every
+// geoset, visible or not, so hiding geosets never changes which LOD is
+// rendered. The bounds (mesh.min/max, mesh.bounded) only cover geosets with
+// alphas[i] > 0, so the camera frames what's actually shown at upload time.
+// For each layer whose source is texture.Texture, its DDS is read through
+// storage and uploaded once per content key, shared across geosets and
+// layers; a masked layer's ORM is likewise uploaded once per content key,
+// but only when its DDS is DXT5 — otherwise the layer draws unmasked.
+// Geosets are returned opaque first (first layer's filter none/transparent,
+// or no layers), then blended, each group ordered by priority plane
+// ascending then geoset index. GL must be current.
+func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, layers [][]texture.Layer, priority []int32) modelMesh {
+	lod := mdx.LowestLOD(geosets)
 
 	mesh := modelMesh{lod: lod, textures: map[[16]byte]uint32{}}
 
@@ -359,48 +344,48 @@ func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, l
 		if len(gls) == 0 {
 			// No material (or an out-of-range id): draw flat grey, as a
 			// single opaque layer, same as a geoset with a grey diffuse.
-			gls = []geosetLayer{{filter: mdx.FilterNone, alpha: 1}}
+			gls = []texture.Layer{{Filter: mdx.FilterNone, Alpha: 1}}
 		}
-		gg.opaque = gls[0].filter == mdx.FilterNone || gls[0].filter == mdx.FilterTransparent
+		gg.opaque = gls[0].Filter == mdx.FilterNone || gls[0].Filter == mdx.FilterTransparent
 		gg.layers = make([]gpuLayer, len(gls))
 		for j, l := range gls {
 			gpuL := gpuLayer{
-				source:   l.source,
-				filter:   l.filter,
-				shading:  l.shading,
-				alpha:    l.alpha,
-				uvOffset: int32(posNormBytes + l.uvSet*uvBlockBytes),
+				source:   l.Source,
+				filter:   l.Filter,
+				shading:  l.Shading,
+				alpha:    l.Alpha,
+				uvOffset: int32(posNormBytes + l.UVSet*uvBlockBytes),
 			}
 
-			if l.flags&1 != 0 {
+			if l.Flags&1 != 0 {
 				gpuL.wrapS = gl.REPEAT
 			} else {
 				gpuL.wrapS = gl.CLAMP_TO_EDGE
 			}
-			if l.flags&2 != 0 {
+			if l.Flags&2 != 0 {
 				gpuL.wrapT = gl.REPEAT
 			} else {
 				gpuL.wrapT = gl.CLAMP_TO_EDGE
 			}
 
-			if l.source == sourceTexture {
-				tex, ok := mesh.textures[l.entry.CKey]
+			if l.Source == texture.Texture {
+				tex, ok := mesh.textures[l.Entry.CKey]
 				if !ok {
-					data := storage.ReadByCKey(l.entry.CKey)
+					data := storage.ReadByCKey(l.Entry.CKey)
 					tex = uploadTexture(texture.ReadDDS(data), data)
-					mesh.textures[l.entry.CKey] = tex
+					mesh.textures[l.Entry.CKey] = tex
 				}
 				gpuL.texture = tex
 			}
 
-			if l.masked {
-				tex, ok := mesh.textures[l.mask.CKey]
+			if l.Masked {
+				tex, ok := mesh.textures[l.Mask.CKey]
 				if !ok {
-					data := storage.ReadByCKey(l.mask.CKey)
+					data := storage.ReadByCKey(l.Mask.CKey)
 					dds := texture.ReadDDS(data)
 					if dds.Format == texture.DXT5 {
 						tex = uploadTexture(dds, data)
-						mesh.textures[l.mask.CKey] = tex
+						mesh.textures[l.Mask.CKey] = tex
 					}
 				}
 				gpuL.mask = tex
@@ -521,9 +506,9 @@ func (m *modelMesh) draw(prog *meshProgram, view, proj mat4, team teamTextures, 
 
 			tex := l.texture
 			switch l.source {
-			case sourceTeamColor:
+			case texture.TeamColor:
 				tex = team.color
-			case sourceTeamGlow:
+			case texture.TeamGlow:
 				tex = team.glow
 			}
 			if tex != 0 {
