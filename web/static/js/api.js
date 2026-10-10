@@ -170,3 +170,13 @@ export async function getMesh(model) {
 	const resp = await checkOK(await fetch(model.mesh.url));
 	return resp.arrayBuffer();
 }
+
+/**
+ * getTexture fetches ref.url (GET /api/texture?ckey=), the raw .dds bytes.
+ * @param {TextureRef} ref
+ * @returns {Promise<ArrayBuffer>}
+ */
+export async function getTexture(ref) {
+	const resp = await checkOK(await fetch(ref.url));
+	return resp.arrayBuffer();
+}
