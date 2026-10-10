@@ -369,8 +369,9 @@ func defaultSequenceIndex(seqs []mdx.Sequence) int32 {
 }
 
 // sequenceIndexByName returns the index of the first sequence whose name
-// matches name case-insensitively, or -1 when none does (including when
-// name is "").
+// matches name case-insensitively, else the first whose normalised name
+// (mdx.SequenceKey) matches, or -1 when neither does (including when name is
+// "").
 func sequenceIndexByName(seqs []mdx.Sequence, name string) int32 {
 	if name == "" {
 		return -1
@@ -380,14 +381,23 @@ func sequenceIndexByName(seqs []mdx.Sequence, name string) int32 {
 			return int32(i)
 		}
 	}
+	key := mdx.SequenceKey(name)
+	if key == "" {
+		return -1
+	}
+	for i, s := range seqs {
+		if mdx.SequenceKey(s.Name) == key {
+			return int32(i)
+		}
+	}
 	return -1
 }
 
 // loadModel reads and parses the model at models[idx] through storage,
 // keeping its version, chunk count, geosets and skeleton in p.model, posed
 // at the previous model's sequence by name when the new model has one, else
-// the default sequence's start frame (identity matrices and alpha 1 when the
-// model has no sequences).
+// by normalised name, else the default sequence's start frame (identity
+// matrices and alpha 1 when the model has no sequences).
 func (p *modelPicker) loadModel(idx int) {
 	previousSequence := p.model.sequence
 	entry := p.models[idx].entry
