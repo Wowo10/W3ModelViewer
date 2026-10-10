@@ -7,6 +7,7 @@ import { getModels, getModel, getMesh, getTexture } from "./api.js";
 import { buildTree, editionOptions, matchModels, refresh, rows } from "./tree.js";
 import { OrbitCamera, wheelSteps } from "./camera.js";
 import { decodeMesh, visibleBounds } from "./mesh.js";
+import { parseDDS } from "./dds.js";
 import { Renderer } from "./renderer.js";
 import { uploadTexture } from "./texture.js";
 import { TreeView } from "./treeview.js";
@@ -17,6 +18,7 @@ import { renderModelPanel } from "./modelpanel.js";
 /** @typedef {import("./api.js").TextureRef} TextureRef */
 /** @typedef {import("./texture.js").CompressionExts} CompressionExts */
 /** @typedef {import("./texture.js").UploadedTexture} UploadedTexture */
+/** @typedef {import("./modelpanel.js").TextureInfo} TextureInfo */
 
 async function main() {
 	const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("canvas"));
@@ -63,6 +65,7 @@ async function main() {
 		editionSelect.appendChild(opt);
 	}
 
+	let currentPlayer = 0;
 	let teamToken = 0;
 	/** @param {number} player */
 	async function loadTeam(player) {
@@ -81,7 +84,13 @@ async function main() {
 		}
 		renderer.setTeam(color.texture, glow.texture);
 	}
-	loadTeam(0);
+	loadTeam(currentPlayer);
+
+	/** @param {number} player */
+	function selectPlayer(player) {
+		currentPlayer = player;
+		loadTeam(player);
+	}
 
 	let filtering = false;
 	/** @type {boolean[]} */
@@ -127,14 +136,21 @@ async function main() {
 	panelEl.textContent = "Select a model";
 
 	/**
-	 * uniqueTextureRefs collects every distinct texture/mask TextureRef used
-	 * by model's lowest-LOD geosets' layers, keyed by content key.
+	 * collectTextureRefs gathers every distinct texture/mask TextureRef used
+	 * by model's lowest-LOD geosets' layers, keyed by content key, plus
+	 * which ckeys are ever used as a plain texture vs. as a mask (a ckey
+	 * used only as a mask and whose DDS isn't DXT5 is never uploaded - it
+	 * would be unmasked on the desktop too).
 	 * @param {Model} model
-	 * @returns {Map<string, TextureRef>}
+	 * @returns {{refs: Map<string, TextureRef>, asTexture: Set<string>, asMask: Set<string>}}
 	 */
-	function uniqueTextureRefs(model) {
+	function collectTextureRefs(model) {
 		/** @type {Map<string, TextureRef>} */
 		const refs = new Map();
+		/** @type {Set<string>} */
+		const asTexture = new Set();
+		/** @type {Set<string>} */
+		const asMask = new Set();
 		for (const g of model.geosets) {
 			if (g.mesh === null) {
 				continue;
@@ -142,13 +158,15 @@ async function main() {
 			for (const l of g.layers) {
 				if (l.texture) {
 					refs.set(l.texture.ckey, l.texture);
+					asTexture.add(l.texture.ckey);
 				}
 				if (l.mask) {
 					refs.set(l.mask.ckey, l.mask);
+					asMask.add(l.mask.ckey);
 				}
 			}
 		}
-		return refs;
+		return { refs, asTexture, asMask };
 	}
 
 	/** @param {number} modelIndex */
@@ -170,11 +188,11 @@ async function main() {
 				return;
 			}
 
-			const refs = uniqueTextureRefs(model);
+			const { refs, asTexture, asMask } = collectTextureRefs(model);
 			const entries = await Promise.all(
 				[...refs.entries()].map(async ([ckey, ref]) => {
 					const buffer = await getTexture(ref);
-					return /** @type {[string, ArrayBuffer]} */ ([ckey, buffer]);
+					return /** @type {[string, TextureRef, ArrayBuffer]} */ ([ckey, ref, buffer]);
 				}),
 			);
 			if (token !== loadToken) {
@@ -183,8 +201,18 @@ async function main() {
 
 			/** @type {Map<string, UploadedTexture>} */
 			const textures = new Map();
-			for (const [ckey, buffer] of entries) {
-				textures.set(ckey, uploadTexture(gl, exts, buffer));
+			/** @type {TextureInfo[]} */
+			const textureInfos = [];
+			for (const [ckey, ref, buffer] of entries) {
+				const dds = parseDDS(buffer);
+				const maskOnly = asMask.has(ckey) && !asTexture.has(ckey);
+				if (maskOnly && dds.format !== "DXT5") {
+					textureInfos.push({ path: ref.path, format: dds.format, width: dds.width, height: dds.height, mips: dds.mips.length, uploadPath: "mask ignored: not DXT5" });
+					continue;
+				}
+				const uploaded = uploadTexture(gl, exts, buffer);
+				textures.set(ckey, uploaded);
+				textureInfos.push({ path: ref.path, format: uploaded.format, width: uploaded.width, height: uploaded.height, mips: uploaded.mips, uploadPath: uploaded.path });
 			}
 			if (token !== loadToken) {
 				for (const t of textures.values()) {
@@ -202,11 +230,16 @@ async function main() {
 				framedName = model.name.toLowerCase();
 			}
 
-			renderModelPanel(panelEl, model, (path) => {
-				const idx = models.findIndex((m) => m.path === path);
-				if (idx !== -1) {
-					selectModel(idx);
-				}
+			renderModelPanel(panelEl, model, {
+				onSelectEdition(path) {
+					const idx = models.findIndex((m) => m.path === path);
+					if (idx !== -1) {
+						selectModel(idx);
+					}
+				},
+				player: currentPlayer,
+				onSelectPlayer: selectPlayer,
+				textures: textureInfos,
 			});
 		} catch (err) {
 			if (token !== loadToken) {

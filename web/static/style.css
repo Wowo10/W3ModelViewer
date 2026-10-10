@@ -116,19 +116,35 @@ html, body {
 	font-weight: bold;
 }
 
-table.model-geosets {
+.model-team {
+	margin-bottom: 4px;
+}
+
+table.model-geosets, table.model-textures {
 	border-collapse: collapse;
 	margin-top: 6px;
 }
 
-table.model-geosets th, table.model-geosets td {
+table.model-geosets th, table.model-geosets td, table.model-textures th, table.model-textures td {
 	border: 1px solid #333;
 	padding: 2px 6px;
 	text-align: right;
 }
 
-table.model-geosets th:first-child, table.model-geosets td:first-child {
+table.model-geosets th:first-child, table.model-geosets td:first-child,
+table.model-textures th:first-child, table.model-textures td:first-child {
 	text-align: left;
+}
+
+table.model-geosets td:last-child {
+	text-align: left;
+	white-space: normal;
+	max-width: 240px;
+	word-break: break-word;
+}
+
+table.model-textures td:first-child {
+	word-break: break-all;
 }
 
 .model-geosets-total {
