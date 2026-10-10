@@ -1,10 +1,12 @@
 // WebGL2 renderer: ports the desktop's mesh shader and draw (viewer/mesh.go)
 // to the page - every layer textured, blended and team-coloured, in the
-// desktop's draw order and GL state. No skinning or per-frame pose yet
-// (WEB-06): geosets are drawn at their upload-time alpha and bind pose.
+// desktop's draw order and GL state, skinned on the GPU from a per-pose
+// RGBA32F node matrix texture and each vertex's up to 8 influences
+// (Geoset.Influences(), see viewer/mesh.go and viewer/pose.go).
 
 import { mul } from "./mat4.js";
 import { layerState, geosetLayers, drawOrder } from "./layers.js";
+import { MATRIX_TEXTURE_WIDTH, matrixTextureSize } from "./pose.js";
 
 /** @typedef {import("./mat4.js").Mat4} Mat4 */
 /** @typedef {import("./mesh.js").DecodedGeoset} DecodedGeoset */
@@ -15,27 +17,60 @@ import { layerState, geosetLayers, drawOrder } from "./layers.js";
 const POSITION_ATTRIB = 0;
 const NORMAL_ATTRIB = 1;
 const UV_ATTRIB = 2;
+const NODES0_ATTRIB = 3;
+const NODES1_ATTRIB = 4;
+const WEIGHTS0_ATTRIB = 5;
+const WEIGHTS1_ATTRIB = 6;
 
 // Texture units, past diffuseMap (0), ormMap (1) and teamColorMap (2).
 const DIFFUSE_UNIT = 0;
 const ORM_UNIT = 1;
 const TEAM_COLOR_UNIT = 2;
+const NODE_MATRICES_UNIT = 3;
 
 const VERTEX_SHADER_SRC = `#version 300 es
 in vec3 position;
 in vec3 normal;
 in vec2 uv;
+in uvec4 nodes0;
+in uvec4 nodes1;
+in vec4 weights0;
+in vec4 weights1;
 
 uniform mat4 viewProj;
 uniform mat4 view;
+uniform highp sampler2D nodeMatrices;
 
 out vec3 vNormal;
 out vec2 vUV;
 
+ivec2 texelPos(int t) {
+	return ivec2(t % ${MATRIX_TEXTURE_WIDTH}, t / ${MATRIX_TEXTURE_WIDTH});
+}
+
+mat4 nodeMatrix(uint id) {
+	int base = int(id) * 4;
+	return mat4(
+		texelFetch(nodeMatrices, texelPos(base), 0),
+		texelFetch(nodeMatrices, texelPos(base + 1), 0),
+		texelFetch(nodeMatrices, texelPos(base + 2), 0),
+		texelFetch(nodeMatrices, texelPos(base + 3), 0)
+	);
+}
+
 void main() {
-	vNormal = mat3(view) * normal;
+	mat4 skin = weights0[0] * nodeMatrix(nodes0[0])
+	          + weights0[1] * nodeMatrix(nodes0[1])
+	          + weights0[2] * nodeMatrix(nodes0[2])
+	          + weights0[3] * nodeMatrix(nodes0[3])
+	          + weights1[0] * nodeMatrix(nodes1[0])
+	          + weights1[1] * nodeMatrix(nodes1[1])
+	          + weights1[2] * nodeMatrix(nodes1[2])
+	          + weights1[3] * nodeMatrix(nodes1[3]);
+
+	vNormal = mat3(view) * mat3(skin) * normal;
 	vUV = uv;
-	gl_Position = viewProj * vec4(position, 1.0);
+	gl_Position = viewProj * skin * vec4(position, 1.0);
 }
 `;
 
@@ -123,6 +158,10 @@ function compileProgram(gl) {
 	gl.bindAttribLocation(program, POSITION_ATTRIB, "position");
 	gl.bindAttribLocation(program, NORMAL_ATTRIB, "normal");
 	gl.bindAttribLocation(program, UV_ATTRIB, "uv");
+	gl.bindAttribLocation(program, NODES0_ATTRIB, "nodes0");
+	gl.bindAttribLocation(program, NODES1_ATTRIB, "nodes1");
+	gl.bindAttribLocation(program, WEIGHTS0_ATTRIB, "weights0");
+	gl.bindAttribLocation(program, WEIGHTS1_ATTRIB, "weights1");
 	gl.linkProgram(program);
 
 	gl.deleteShader(vs);
@@ -154,6 +193,7 @@ function compileProgram(gl) {
  * @property {WebGLBuffer} ibo
  * @property {number} count - indices drawn
  * @property {GPULayer[]} layers
+ * @property {number} index - index into model.geosets, to look up the current pose alpha
  */
 
 /**
@@ -193,6 +233,7 @@ export class Renderer {
 		gl.uniform1i(gl.getUniformLocation(this.program, "diffuseMap"), DIFFUSE_UNIT);
 		gl.uniform1i(gl.getUniformLocation(this.program, "ormMap"), ORM_UNIT);
 		gl.uniform1i(gl.getUniformLocation(this.program, "teamColorMap"), TEAM_COLOR_UNIT);
+		gl.uniform1i(gl.getUniformLocation(this.program, "nodeMatrices"), NODE_MATRICES_UNIT);
 		gl.useProgram(null);
 
 		/** @type {WebGLBuffer | null} */
@@ -203,16 +244,28 @@ export class Renderer {
 		this.textures = new Map();
 		/** @type {TeamTextures | null} */
 		this.team = null;
+
+		/** @type {WebGLTexture | null} */
+		this.matrixTexture = null;
+		this.matrixWidth = 0;
+		this.matrixHeight = 0;
+		/** @type {Float32Array | null} - one per geoset, from the last setPose; draw skips until set */
+		this.alphas = null;
 	}
 
 	/**
 	 * setModel uploads buffer once as a shared ARRAY_BUFFER and builds one VAO
 	 * + its own ELEMENT_ARRAY_BUFFER per geoset, in the desktop's draw order
 	 * (opaque first, then blended by priority plane, stable on geoset
-	 * index). textures is keyed by the hex content key of every resolved
-	 * diffuse/mask texture the model's lowest-LOD layers use; the renderer
-	 * takes ownership and deletes them on the next setModel/releaseMesh.
-	 * Releases the previous model's GL objects first.
+	 * index), over every lowest-LOD geoset - alpha is per-pose now (see
+	 * draw), so a geoset hidden at upload time (e.g. a construction stage)
+	 * can still appear once its track says so. textures is keyed by the hex
+	 * content key of every resolved diffuse/mask texture the model's
+	 * lowest-LOD layers use; the renderer takes ownership and deletes them
+	 * on the next setModel/releaseMesh. Also (re)allocates the node matrix
+	 * texture for model.objects; a pose must be set with setPose before
+	 * draw renders anything for the new model. Releases the previous
+	 * model's GL objects first.
 	 * @param {ArrayBuffer} buffer
 	 * @param {DecodedGeoset[]} decoded
 	 * @param {Model} model
@@ -231,13 +284,10 @@ export class Renderer {
 		gl.bufferData(gl.ARRAY_BUFFER, buffer, gl.STATIC_DRAW);
 		this.vbo = vbo;
 
-		// Hidden geosets (alpha 0, e.g. death/corpse/construction stages) draw
-		// nothing, as the desktop's modelMesh.draw skips them too.
-		const visible = decoded.filter((dg) => model.geosets[dg.index].alpha > 0);
-		const order = drawOrder(visible.map((dg) => model.geosets[dg.index]));
+		const order = drawOrder(decoded.map((dg) => model.geosets[dg.index]));
 
 		this.geosets = order.map((i) => {
-			const dg = visible[i];
+			const dg = decoded[i];
 			const def = model.geosets[dg.index];
 			const layers = geosetLayers(def);
 
@@ -257,6 +307,15 @@ export class Renderer {
 				gl.disableVertexAttribArray(UV_ATTRIB);
 				gl.vertexAttrib2f(UV_ATTRIB, 0, 0);
 			}
+
+			gl.vertexAttribIPointer(NODES0_ATTRIB, 4, gl.UNSIGNED_INT, 32, dg.nodes.byteOffset);
+			gl.enableVertexAttribArray(NODES0_ATTRIB);
+			gl.vertexAttribIPointer(NODES1_ATTRIB, 4, gl.UNSIGNED_INT, 32, dg.nodes.byteOffset + 16);
+			gl.enableVertexAttribArray(NODES1_ATTRIB);
+			gl.vertexAttribPointer(WEIGHTS0_ATTRIB, 4, gl.FLOAT, false, 32, dg.weights.byteOffset);
+			gl.enableVertexAttribArray(WEIGHTS0_ATTRIB);
+			gl.vertexAttribPointer(WEIGHTS1_ATTRIB, 4, gl.FLOAT, false, 32, dg.weights.byteOffset + 16);
+			gl.enableVertexAttribArray(WEIGHTS1_ATTRIB);
 
 			const ibo = gl.createBuffer();
 			if (!ibo) {
@@ -278,15 +337,56 @@ export class Renderer {
 					source: l.source,
 					texture: texRecord ? texRecord.texture : null,
 					mask: masked && maskRecord ? maskRecord.texture : null,
-					alpha: l.alpha * def.alpha,
+					alpha: l.alpha,
 					wrapS: wrapEnum(gl, l.wrapWidth),
 					wrapT: wrapEnum(gl, l.wrapHeight),
 					uvOffset: dg.uvs.length > 0 ? dg.uvs[Math.min(l.uvSet, dg.uvs.length - 1)].byteOffset : null,
 				};
 			});
 
-			return { vao, ibo, count: dg.indices.length, layers: gpuLayers };
+			return { vao, ibo, count: dg.indices.length, layers: gpuLayers, index: dg.index };
 		});
+
+		const size = matrixTextureSize(model.objects);
+		const texture = gl.createTexture();
+		if (!texture) {
+			throw new Error("renderer: createTexture failed");
+		}
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, size.width, size.height, 0, gl.RGBA, gl.FLOAT, null);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+
+		this.matrixTexture = texture;
+		this.matrixWidth = size.width;
+		this.matrixHeight = size.height;
+		this.alphas = null;
+	}
+
+	/**
+	 * setPose uploads matrices (model.objects x 16 float32, column-major, by
+	 * object id) into the node matrix texture and keeps alphas (one per
+	 * geoset) for draw to look up by geoset index.
+	 * @param {Float32Array} matrices
+	 * @param {Float32Array} alphas
+	 */
+	setPose(matrices, alphas) {
+		const gl = this.gl;
+		if (!this.matrixTexture) {
+			return;
+		}
+
+		const padded = new Float32Array(this.matrixWidth * this.matrixHeight * 4);
+		padded.set(matrices);
+
+		gl.bindTexture(gl.TEXTURE_2D, this.matrixTexture);
+		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.matrixWidth, this.matrixHeight, gl.RGBA, gl.FLOAT, padded);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+
+		this.alphas = alphas;
 	}
 
 	/**
@@ -304,7 +404,7 @@ export class Renderer {
 		this.team = { color, glow };
 	}
 
-	/** releaseMesh deletes every geoset's VAO/IBO, the shared VBO and every uploaded texture (not the team pair). */
+	/** releaseMesh deletes every geoset's VAO/IBO, the shared VBO, the node matrix texture and every uploaded texture (not the team pair). */
 	releaseMesh() {
 		const gl = this.gl;
 		for (const g of this.geosets) {
@@ -316,6 +416,11 @@ export class Renderer {
 			gl.deleteBuffer(this.vbo);
 			this.vbo = null;
 		}
+		if (this.matrixTexture) {
+			gl.deleteTexture(this.matrixTexture);
+			this.matrixTexture = null;
+		}
+		this.alphas = null;
 		for (const t of this.textures.values()) {
 			gl.deleteTexture(t.texture);
 		}
@@ -326,7 +431,10 @@ export class Renderer {
 	 * draw clears the canvas and draws every geoset's layers: opaque first,
 	 * then blended (the order setModel already sorted into), each layer's GL
 	 * state from its filter mode and shading flags, team colour/glow layers
-	 * drawn grey until the team pair is loaded.
+	 * drawn grey until the team pair is loaded. A geoset whose current pose
+	 * alpha is <= 0 is skipped entirely; otherwise each layer's alpha
+	 * uniform is its own alpha times the geoset's. Draws nothing until
+	 * setPose has been called at least once for the current model.
 	 * @param {Mat4} view
 	 * @param {Mat4} proj
 	 * @param {number} width
@@ -338,9 +446,10 @@ export class Renderer {
 		gl.clearColor(0.1, 0.11, 0.13, 1);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-		if (this.geosets.length === 0) {
+		if (this.geosets.length === 0 || this.alphas === null) {
 			return;
 		}
+		const alphas = this.alphas;
 
 		gl.disable(gl.CULL_FACE);
 		gl.depthFunc(gl.LEQUAL);
@@ -350,8 +459,16 @@ export class Renderer {
 		gl.uniformMatrix4fv(this.viewProjLoc, false, viewProj);
 		gl.uniformMatrix4fv(this.viewLoc, false, view);
 
+		gl.activeTexture(gl.TEXTURE0 + NODE_MATRICES_UNIT);
+		gl.bindTexture(gl.TEXTURE_2D, this.matrixTexture);
+
 		gl.activeTexture(gl.TEXTURE0 + DIFFUSE_UNIT);
 		for (const g of this.geosets) {
+			const geosetAlpha = alphas[g.index];
+			if (geosetAlpha <= 0) {
+				continue;
+			}
+
 			gl.bindVertexArray(g.vao);
 			gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo); // the UV pointer below needs ARRAY_BUFFER bound; VAO state doesn't cover it
 
@@ -371,7 +488,7 @@ export class Renderer {
 
 				gl.uniform1i(this.unshadedLoc, l.state.unshaded ? 1 : 0);
 				gl.uniform1i(this.alphaTestLoc, l.state.alphaTest ? 1 : 0);
-				gl.uniform1f(this.alphaLoc, l.alpha);
+				gl.uniform1f(this.alphaLoc, l.alpha * geosetAlpha);
 
 				let tex = l.texture;
 				if (l.source === "teamColor" && this.team) {
