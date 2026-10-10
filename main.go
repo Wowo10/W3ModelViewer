@@ -17,6 +17,7 @@ import (
 	"modelView/model/mdx"
 	"modelView/model/texture"
 	"modelView/viewer"
+	"modelView/web"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,19 +41,22 @@ func main() {
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
 	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), textures (each with its resolved .dds path and format, or \"unresolved\"), materials, sequences, default sequence, geoset vertex, triangle and alpha counts and a skinning summary of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
 	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
+	webFlag := flag.Bool("web", false, "serve the web viewer on -addr until stopped instead of opening the desktop viewer; -view is ignored with -web")
+	addr := flag.String("addr", "127.0.0.1:8080", "address for -web to listen on; must be localhost or a loopback IP")
 	flag.Usage = func() {
 		w := flag.CommandLine.Output()
 		fmt.Fprintf(w, "Usage of %s:\n", os.Args[0])
-		fmt.Fprintln(w, "Opens the model viewer on wardata/. With an output flag (-list, -variants, -extract, -mdxinfo, -survey) it prints that instead and doesn't open the viewer, unless -view is also given.")
+		fmt.Fprintln(w, "Opens the model viewer on wardata/. With an output flag (-list, -variants, -extract, -mdxinfo, -survey) it prints that instead and doesn't open the viewer, unless -view is also given. -web serves the web viewer instead of opening the desktop one.")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	web.CheckAddr(*addr)
 
 	if *list || *variants != "" || *mdxinfo != "" {
 		out = os.Stderr
 	}
 
-	output := *list || *variants != "" || *extract != "" || *mdxinfo != "" || *survey
+	output := *list || *variants != "" || *extract != "" || *mdxinfo != "" || *survey || *webFlag
 
 	idxPackages.DEBUG = *debug
 	blte.DEBUG = *debug
@@ -92,7 +96,9 @@ func main() {
 		surveyFiles(storage, r)
 	}
 
-	if *view || !output {
+	if *webFlag {
+		web.New(storage, r).Serve(*addr)
+	} else if *view || !output {
 		runViewer(storage, r)
 	}
 }
