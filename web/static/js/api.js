@@ -1,6 +1,6 @@
 // JSDoc typedefs for the JSON and binary shapes served by web.Server (see
 // the modelView/web package doc comment, the source of truth for this
-// API). No decoders here yet; WEB-04/WEB-06 add them with tests.
+// API), plus fetch helpers for them. Binary decoders live in mesh.js.
 
 /** The most node ids/weights any vertex carries (mdx.MaxInfluences). */
 export const MAX_INFLUENCES = 8;
@@ -128,3 +128,45 @@ export const MAX_INFLUENCES = 8;
  * float32 alphas. seq is an index into Model.sequences or -1 (bind pose);
  * frame and global are uint32; all three are required.
  */
+
+/**
+ * checkOK throws with the status and body text when resp isn't a 2xx.
+ * @param {Response} resp
+ * @returns {Promise<Response>}
+ */
+async function checkOK(resp) {
+	if (!resp.ok) {
+		const body = await resp.text();
+		throw new Error(`${resp.status} ${resp.statusText}: ${body}`);
+	}
+	return resp;
+}
+
+/**
+ * getModels fetches GET /api/models.
+ * @returns {Promise<ModelList>}
+ */
+export async function getModels() {
+	const resp = await checkOK(await fetch("/api/models"));
+	return resp.json();
+}
+
+/**
+ * getModel fetches GET /api/model?path=.
+ * @param {string} path
+ * @returns {Promise<Model>}
+ */
+export async function getModel(path) {
+	const resp = await checkOK(await fetch("/api/model?path=" + encodeURIComponent(path)));
+	return resp.json();
+}
+
+/**
+ * getMesh fetches model.mesh.url (GET /api/mesh?path=).
+ * @param {Model} model
+ * @returns {Promise<ArrayBuffer>}
+ */
+export async function getMesh(model) {
+	const resp = await checkOK(await fetch(model.mesh.url));
+	return resp.arrayBuffer();
+}
