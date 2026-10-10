@@ -74,7 +74,7 @@ func newModelTree(models []modelEntry) modelTree {
 
 		t.dirs[parent].models = append(t.dirs[parent].models, i)
 		t.modelDir[i] = parent
-		t.leafLabels[i] = leafLabel(file, m.entry.Variant)
+		t.leafLabels[i] = leafLabel(file, m.entry.Variant, i)
 	}
 
 	for d := range t.dirs {
@@ -92,13 +92,15 @@ func splitName(name string) (dir, file string) {
 	return "", name
 }
 
-// leafLabel builds a model leaf's label: its file name, edition and overlays.
-func leafLabel(file string, v root.Variant) string {
+// leafLabel builds a model leaf's label: its file name, edition and
+// overlays, with a "##m<model>" ID suffix (hidden from display) so two
+// models with the same file name and edition get distinct ImGui IDs.
+func leafLabel(file string, v root.Variant, model int) string {
 	label := fmt.Sprintf("%s [%s", file, v.Edition)
 	for _, o := range v.Overlays {
 		label += ", " + o
 	}
-	return label + "]"
+	return fmt.Sprintf("%s]##m%d", label, model)
 }
 
 // refresh recomputes every directory's count from shown (indexed like

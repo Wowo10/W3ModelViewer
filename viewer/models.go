@@ -227,12 +227,13 @@ type modelPicker struct {
 	editions []string       // "all" followed by every edition that has a model
 	tree     modelTree      // directories grouped from models, built once
 
-	filter   string
-	edition  int32
-	visible  []int     // indices into models matching filter and edition
-	shown    []bool    // indices into models, true when matching filter and edition
-	rows     []treeRow // the tree's rows currently visible, rebuilt by refresh and by toggling a directory
-	selected int       // index into models, -1 = none
+	filter    string
+	filtering bool // p.filter != "" as of the last refresh; while true, toggling a directory touches filterOpen, not open
+	edition   int32
+	visible   []int     // indices into models matching filter and edition
+	shown     []bool    // indices into models, true when matching filter and edition
+	rows      []treeRow // the tree's rows currently visible, rebuilt by refresh and by toggling a directory
+	selected  int       // index into models, -1 = none
 
 	loaded int // index into models of the model currently in model, -1 = none
 	model  selectedModel
@@ -328,6 +329,7 @@ func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
 func (p *modelPicker) refresh() {
 	filter := strings.ToLower(p.filter)
 	edition := p.editions[p.edition]
+	p.filtering = filter != ""
 
 	p.visible = p.visible[:0]
 	if p.shown == nil {
@@ -347,8 +349,8 @@ func (p *modelPicker) refresh() {
 		}
 	}
 
-	p.tree.refresh(p.shown, filter != "")
-	p.rows = p.tree.rows(p.shown, filter != "")
+	p.tree.refresh(p.shown, p.filtering)
+	p.rows = p.tree.rows(p.shown, p.filtering)
 }
 
 // defaultSequenceIndex returns the index of the sequence mdx.DefaultSequence
@@ -503,7 +505,8 @@ func variantLabel(entry root.Entry) string {
 }
 
 // draw shows the "Models" window: a filter box, an edition combo and a
-// clipped, scrolling list of matching paths.
+// collapsible, clipped directory tree of matching models (model counts per
+// directory; while filtering, every branch containing a match is open).
 func (p *modelPicker) draw() {
 	imgui.SetNextWindowPosV(imgui.Vec2{X: 10, Y: 10}, imgui.CondFirstUseEver, imgui.Vec2{})
 	imgui.SetNextWindowSizeV(imgui.Vec2{X: 480, Y: 660}, imgui.CondFirstUseEver)
@@ -520,17 +523,50 @@ func (p *modelPicker) draw() {
 		imgui.Separator()
 
 		if imgui.BeginChildStrV("##modelList", imgui.Vec2{}, imgui.ChildFlagsNone, 0) {
+			indent := imgui.CurrentStyle().IndentSpacing()
+			rowsDirty := false
+
 			clipper := imgui.NewListClipper()
-			clipper.Begin(int32(len(p.visible)))
+			clipper.Begin(int32(len(p.rows)))
 			for clipper.Step() {
 				for i := clipper.DisplayStart(); i < clipper.DisplayEnd(); i++ {
-					idx := p.visible[i]
-					if imgui.SelectableBoolV(p.models[idx].entry.Path, idx == p.selected, 0, imgui.Vec2{}) {
-						p.selected = idx
+					row := p.rows[i]
+					imgui.SetCursorPosX(float32(row.depth) * indent)
+
+					if row.dir != -1 {
+						dir := &p.tree.dirs[row.dir]
+						open := dir.open
+						if p.filtering {
+							open = dir.filterOpen
+						}
+						imgui.SetNextItemOpen(open)
+						imgui.TreeNodeExStrV(dir.label, imgui.TreeNodeFlagsNoTreePushOnOpen|imgui.TreeNodeFlagsSpanAvailWidth)
+						if imgui.IsItemToggledOpen() {
+							if p.filtering {
+								dir.filterOpen = !dir.filterOpen
+							} else {
+								dir.open = !dir.open
+							}
+							rowsDirty = true
+						}
+						continue
+					}
+
+					flags := imgui.TreeNodeFlagsNoTreePushOnOpen | imgui.TreeNodeFlagsLeaf | imgui.TreeNodeFlagsSpanAvailWidth
+					if row.model == p.selected {
+						flags |= imgui.TreeNodeFlagsSelected
+					}
+					imgui.TreeNodeExStrV(p.tree.leafLabels[row.model], flags)
+					if imgui.IsItemClicked() {
+						p.selected = row.model
 					}
 				}
 			}
 			clipper.Destroy()
+
+			if rowsDirty {
+				p.rows = p.tree.rows(p.shown, p.filtering)
+			}
 		}
 		imgui.EndChild()
 	}
