@@ -70,19 +70,26 @@ async function main() {
 	/** @param {number} player */
 	async function loadTeam(player) {
 		const token = ++teamToken;
-		const team = list.team[player];
-		const [colorBuffer, glowBuffer] = await Promise.all([getTexture(team.color), getTexture(team.glow)]);
-		if (token !== teamToken) {
-			return;
+		try {
+			const team = list.team[player];
+			const [colorBuffer, glowBuffer] = await Promise.all([getTexture(team.color), getTexture(team.glow)]);
+			if (token !== teamToken) {
+				return;
+			}
+			const color = uploadTexture(gl, exts, colorBuffer);
+			const glow = uploadTexture(gl, exts, glowBuffer);
+			if (token !== teamToken) {
+				gl.deleteTexture(color.texture);
+				gl.deleteTexture(glow.texture);
+				return;
+			}
+			renderer.setTeam(color.texture, glow.texture);
+		} catch (err) {
+			if (token !== teamToken) {
+				return;
+			}
+			console.error("main: loadTeam:", err);
 		}
-		const color = uploadTexture(gl, exts, colorBuffer);
-		const glow = uploadTexture(gl, exts, glowBuffer);
-		if (token !== teamToken) {
-			gl.deleteTexture(color.texture);
-			gl.deleteTexture(glow.texture);
-			return;
-		}
-		renderer.setTeam(color.texture, glow.texture);
 	}
 	loadTeam(currentPlayer);
 

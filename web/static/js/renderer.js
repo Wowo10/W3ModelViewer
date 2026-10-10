@@ -4,7 +4,7 @@
 // (WEB-06): geosets are drawn at their upload-time alpha and bind pose.
 
 import { mul } from "./mat4.js";
-import { layerState, geosetLayers, isOpaque } from "./layers.js";
+import { layerState, geosetLayers, drawOrder } from "./layers.js";
 
 /** @typedef {import("./mat4.js").Mat4} Mat4 */
 /** @typedef {import("./mesh.js").DecodedGeoset} DecodedGeoset */
@@ -231,20 +231,13 @@ export class Renderer {
 		gl.bufferData(gl.ARRAY_BUFFER, buffer, gl.STATIC_DRAW);
 		this.vbo = vbo;
 
-		/** @type {{dg: DecodedGeoset, opaque: boolean, priority: number}[]} */
-		const entries = decoded.map((dg) => {
-			const def = model.geosets[dg.index];
-			const layers = geosetLayers(def);
-			return { dg, opaque: isOpaque(layers), priority: def.priority };
-		});
-		entries.sort((a, b) => {
-			if (a.opaque !== b.opaque) {
-				return a.opaque ? -1 : 1;
-			}
-			return a.priority - b.priority;
-		});
+		// Hidden geosets (alpha 0, e.g. death/corpse/construction stages) draw
+		// nothing, as the desktop's modelMesh.draw skips them too.
+		const visible = decoded.filter((dg) => model.geosets[dg.index].alpha > 0);
+		const order = drawOrder(visible.map((dg) => model.geosets[dg.index]));
 
-		this.geosets = entries.map(({ dg }) => {
+		this.geosets = order.map((i) => {
+			const dg = visible[i];
 			const def = model.geosets[dg.index];
 			const layers = geosetLayers(def);
 

@@ -168,7 +168,11 @@ export function renderModelPanel(container, model, options) {
 		const tbody = document.createElement("tbody");
 		for (const t of options.textures) {
 			const tr = document.createElement("tr");
-			tr.innerHTML = `<td>${t.path}</td><td>${t.format}</td><td>${t.width}x${t.height}</td><td>${t.mips}</td><td>${t.uploadPath}</td>`;
+			for (const text of [t.path, t.format, `${t.width}x${t.height}`, String(t.mips), t.uploadPath]) {
+				const td = document.createElement("td");
+				td.textContent = text;
+				tr.appendChild(td);
+			}
 			tbody.appendChild(tr);
 		}
 		table.appendChild(tbody);

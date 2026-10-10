@@ -105,18 +105,17 @@ function uploadCPU(gl, texture, dds, bytes) {
  * CPU path with reason "CPU: compressed upload rejected" (browsers can be
  * stricter, or laxer, than the block-size rule in dds.js). Every mip, no
  * filtering past TEXTURE_MAX_LEVEL, trilinear, non-sRGB, no V flip (as
- * stored). GL must be current; ?cpu=1 in cpu forces the CPU path (used to
- * exercise it without a browser lacking the extensions).
+ * stored). GL must be current; main.js's ?cpu=1 exercises the CPU path by
+ * passing exts with both extensions reported missing.
  * @param {WebGL2RenderingContext} gl
  * @param {CompressionExts} exts
  * @param {ArrayBuffer} buffer
- * @param {boolean} [forceCPU]
  * @returns {UploadedTexture}
  */
-export function uploadTexture(gl, exts, buffer, forceCPU = false) {
+export function uploadTexture(gl, exts, buffer) {
 	const dds = parseDDS(buffer);
 	const bytes = new Uint8Array(buffer);
-	let { compressed, reason } = uploadPath(dds, forceCPU ? { s3tc: false, rgtc: false } : exts);
+	let { compressed, reason } = uploadPath(dds, exts);
 
 	const texture = gl.createTexture();
 	if (!texture) {
