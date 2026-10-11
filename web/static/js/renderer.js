@@ -213,7 +213,7 @@ function wrapEnum(gl, wrap) {
 }
 
 /**
- * Renderer draws a model's lowest-LOD geosets, textured and blended per
+ * Renderer draws a model's geosets at the rendered LOD, textured and blended per
  * layer, team-coloured, in the desktop's draw order.
  */
 export class Renderer {
@@ -259,11 +259,11 @@ export class Renderer {
 	 * setModel uploads buffer once as a shared ARRAY_BUFFER and builds one VAO
 	 * + its own ELEMENT_ARRAY_BUFFER per geoset, in the desktop's draw order
 	 * (opaque first, then blended by priority plane, stable on geoset
-	 * index), over every lowest-LOD geoset - alpha is per-pose now (see
+	 * index), over every decoded geoset (one LOD's) - alpha is per-pose now (see
 	 * draw), so a geoset hidden at upload time (e.g. a construction stage)
 	 * can still appear once its track says so. textures is keyed by the hex
 	 * content key of every resolved diffuse/mask texture the model's
-	 * lowest-LOD layers use; the renderer takes ownership and deletes them
+	 * rendered-LOD layers use; the renderer takes ownership and deletes them
 	 * on the next setModel/releaseMesh. Also (re)allocates the node matrix
 	 * texture for model.objects; a pose must be set with setPose before
 	 * draw renders anything for the new model. Releases the previous

@@ -3,6 +3,8 @@
 // table with a layers column and a textures table - mirroring
 // viewer/models.go's "Model" window.
 
+import { lodLabel } from "./mesh.js";
+
 /** @typedef {import("./api.js").Model} Model */
 /** @typedef {import("./api.js").Edition} Edition */
 
@@ -35,7 +37,9 @@ export const playerNames = [
  * @property {(path: string) => void} onSelectEdition
  * @property {number} player - index into playerNames
  * @property {(player: number) => void} onSelectPlayer
- * @property {TextureInfo[]} textures - every unique texture/mask the model's lowest-LOD layers use
+ * @property {number} lodIndex - the rendered LOD, an index into model.lods (-1 without LODs)
+ * @property {(index: number) => void} onSelectLOD
+ * @property {TextureInfo[]} textures - every unique texture/mask the rendered LOD's layers use
  */
 
 /**
@@ -48,20 +52,35 @@ export const playerNames = [
  * forms (viewer/models.go drawModel): no sequences, a sequence with
  * nothing visible, or a sequence with some geosets shown.
  * @param {Model} model
- * @param {number} atLOD - geosets at model.lod
+ * @param {number} lod - the rendered LOD
+ * @param {number} atLOD - geosets at lod
  * @param {number} drawn - of those, how many have alpha > 0
  * @param {string} seqName - "" for no sequences
  * @param {number} frame
  * @returns {string}
  */
-function renderingLine(model, atLOD, drawn, seqName, frame) {
+function renderingLine(model, lod, atLOD, drawn, seqName, frame) {
 	if (seqName === "") {
-		return `Rendering LOD ${model.lod}, no sequences: ${atLOD} of ${model.geosets.length} geosets`;
+		return `Rendering LOD ${lod}, no sequences: ${atLOD} of ${model.geosets.length} geosets`;
 	}
 	if (drawn === 0) {
-		return `Rendering LOD ${model.lod} in "${seqName}" at frame ${frame}: nothing visible`;
+		return `Rendering LOD ${lod} in "${seqName}" at frame ${frame}: nothing visible`;
 	}
-	return `Rendering LOD ${model.lod} in "${seqName}" at frame ${frame}: ${drawn} of ${atLOD} geosets (${atLOD - drawn} hidden)`;
+	return `Rendering LOD ${lod} in "${seqName}" at frame ${frame}: ${drawn} of ${atLOD} geosets (${atLOD - drawn} hidden)`;
+}
+
+/**
+ * drawnText is the geoset table's "drawn" cell: "yes" or "hidden" at the
+ * rendered LOD, empty at any other.
+ * @param {boolean} atLOD
+ * @param {number} alpha
+ * @returns {string}
+ */
+function drawnText(atLOD, alpha) {
+	if (!atLOD) {
+		return "";
+	}
+	return alpha > 0 ? "yes" : "hidden";
 }
 
 /**
@@ -141,6 +160,25 @@ export function renderModelPanel(container, model, options) {
 	teamRow.appendChild(teamLabel);
 	container.appendChild(teamRow);
 
+	if (model.lods.length > 1) {
+		const lodRow = document.createElement("div");
+		lodRow.className = "model-lod";
+		const lodLabelEl = document.createElement("label");
+		lodLabelEl.textContent = "level of detail ";
+		const lodSelect = document.createElement("select");
+		model.lods.forEach((l, i) => {
+			const opt = document.createElement("option");
+			opt.value = String(i);
+			opt.textContent = lodLabel(l);
+			lodSelect.appendChild(opt);
+		});
+		lodSelect.value = String(options.lodIndex);
+		lodSelect.addEventListener("change", () => options.onSelectLOD(Number(lodSelect.value)));
+		lodLabelEl.appendChild(lodSelect);
+		lodRow.appendChild(lodLabelEl);
+		container.appendChild(lodRow);
+	}
+
 	addLine(container, `Version: ${model.version}`);
 	addLine(container, `Chunks: ${model.chunks}`);
 	addLine(container, `Geosets: ${model.geosets.length}`);
@@ -149,12 +187,15 @@ export function renderModelPanel(container, model, options) {
 	let renderingEl = null;
 	/** @type {HTMLElement[]} */
 	const alphaCells = [];
+	/** @type {HTMLElement[]} */
+	const drawnCells = [];
+	const lod = options.lodIndex !== -1 ? model.lods[options.lodIndex].lod : model.lod;
 
 	if (model.geosets.length > 0) {
 		let atLOD = 0;
 		let drawn = 0;
 		for (const g of model.geosets) {
-			if (g.lod !== model.lod) {
+			if (g.lod !== lod) {
 				continue;
 			}
 			atLOD++;
@@ -166,13 +207,13 @@ export function renderModelPanel(container, model, options) {
 		const defaultFrame = model.defaultSequence !== -1 ? model.sequences[model.defaultSequence].start : 0;
 
 		renderingEl = document.createElement("div");
-		renderingEl.textContent = renderingLine(model, atLOD, drawn, defaultSeqName, defaultFrame);
+		renderingEl.textContent = renderingLine(model, lod, atLOD, drawn, defaultSeqName, defaultFrame);
 		container.appendChild(renderingEl);
 
 		const table = document.createElement("table");
 		table.className = "model-geosets";
 		const thead = document.createElement("thead");
-		thead.innerHTML = "<tr><th>geoset</th><th>material</th><th>lod</th><th>vertices</th><th>triangles</th><th>alpha</th><th>layers</th></tr>";
+		thead.innerHTML = "<tr><th>geoset</th><th>material</th><th>lod</th><th>vertices</th><th>triangles</th><th>alpha</th><th>drawn</th><th>layers</th></tr>";
 		table.appendChild(thead);
 
 		const tbody = document.createElement("tbody");
@@ -187,6 +228,11 @@ export function renderModelPanel(container, model, options) {
 			tr.appendChild(alphaTd);
 			alphaCells.push(alphaTd);
 
+			const drawnTd = document.createElement("td");
+			drawnTd.textContent = drawnText(g.lod === lod, g.alpha);
+			tr.appendChild(drawnTd);
+			drawnCells.push(drawnTd);
+
 			const layersTd = document.createElement("td");
 			layersTd.textContent = g.layers.map((l) => l.label).join(" | ");
 			tr.appendChild(layersTd);
@@ -197,7 +243,7 @@ export function renderModelPanel(container, model, options) {
 		});
 		const totalRow = document.createElement("tr");
 		totalRow.className = "model-geosets-total";
-		totalRow.innerHTML = `<td>total</td><td></td><td></td><td>${totalVertices}</td><td>${totalTriangles}</td><td></td><td></td>`;
+		totalRow.innerHTML = `<td>total</td><td></td><td></td><td>${totalVertices}</td><td>${totalTriangles}</td><td></td><td></td><td></td>`;
 		tbody.appendChild(totalRow);
 		table.appendChild(tbody);
 
@@ -241,7 +287,8 @@ export function renderModelPanel(container, model, options) {
 		let drawn = 0;
 		model.geosets.forEach((g, i) => {
 			alphaCells[i].textContent = alphas[i].toFixed(2);
-			if (g.lod !== model.lod) {
+			drawnCells[i].textContent = drawnText(g.lod === lod, alphas[i]);
+			if (g.lod !== lod) {
 				return;
 			}
 			atLOD++;
@@ -250,7 +297,7 @@ export function renderModelPanel(container, model, options) {
 			}
 		});
 
-		renderingEl.textContent = renderingLine(model, atLOD, drawn, seqName, frame);
+		renderingEl.textContent = renderingLine(model, lod, atLOD, drawn, seqName, frame);
 	}
 
 	return { updatePose };

@@ -9,7 +9,7 @@
 import { getModels, getModel, getMesh, getTexture, getPose } from "./api.js";
 import { buildTree, editionOptions, matchModels, refresh, rows } from "./tree.js";
 import { OrbitCamera, wheelSteps } from "./camera.js";
-import { decodeMesh, visibleBounds } from "./mesh.js";
+import { decodeMesh, pickLOD, visibleBounds } from "./mesh.js";
 import { parseDDS } from "./dds.js";
 import { Renderer } from "./renderer.js";
 import { uploadTexture } from "./texture.js";
@@ -22,6 +22,7 @@ import { decodePose, PoseScheduler } from "./pose.js";
 /** @typedef {import("./api.js").ModelListEntry} ModelListEntry */
 /** @typedef {import("./api.js").Model} Model */
 /** @typedef {import("./api.js").TextureRef} TextureRef */
+/** @typedef {import("./api.js").MeshOffsets} MeshOffsets */
 /** @typedef {import("./texture.js").CompressionExts} CompressionExts */
 /** @typedef {import("./texture.js").UploadedTexture} UploadedTexture */
 /** @typedef {import("./modelpanel.js").TextureInfo} TextureInfo */
@@ -159,6 +160,14 @@ async function main() {
 	/** @type {Model | null} */
 	let currentModel = null;
 	let currentSeqIndex = -1;
+	let currentLOD = -1; // index into currentModel.lods, -1 without LODs
+	/** @type {TextureInfo[]} */
+	let currentTextureInfos = [];
+	/** the LOD value the user picked; each model shows it when it has it, else its lowest */
+	let wantLOD = 0;
+	let lodToken = 0;
+	/** @type {{matrices: Float32Array, alphas: Float32Array, seqName: string, frame: number} | null} */
+	let lastPose = null;
 	/** @type {SequenceRef | null} */
 	let currentSeqRef = null;
 	/** @type {ModelPanelControls | null} */
@@ -170,7 +179,7 @@ async function main() {
 	 * pending holds a fetched/decoded model not yet shown, waiting for its
 	 * first pose at (seqIndex, frame) so there's no bind-pose flash; the
 	 * rAF loop re-wants this same request every tick until it arrives.
-	 * @type {{model: Model, meshBuffer: ArrayBuffer, decoded: DecodedGeoset[], textures: Map<string, UploadedTexture>, textureInfos: TextureInfo[], seqIndex: number, frame: number} | null}
+	 * @type {{model: Model, lodIndex: number, meshBuffer: ArrayBuffer, decoded: DecodedGeoset[], textures: Map<string, UploadedTexture>, textureInfos: TextureInfo[], seqIndex: number, frame: number} | null}
 	 */
 	let pending = null;
 
@@ -273,10 +282,12 @@ async function main() {
 		if (!pending) {
 			return;
 		}
-		const { model, meshBuffer, decoded, textures, textureInfos, seqIndex } = pending;
+		const { model, lodIndex, meshBuffer, decoded, textures, textureInfos, seqIndex } = pending;
 		pending = null;
 
 		currentModel = model;
+		currentLOD = lodIndex;
+		currentTextureInfos = textureInfos;
 		currentSeqIndex = seqIndex;
 		currentSeqRef = seqIndex !== -1 ? { name: model.sequences[seqIndex].name, key: model.sequences[seqIndex].key } : null;
 
@@ -289,7 +300,27 @@ async function main() {
 			framedName = model.name.toLowerCase();
 		}
 
-		panelControls = renderModelPanel(panelEl, model, {
+		const seqName = seqIndex !== -1 ? model.sequences[seqIndex].name : "";
+		lastPose = { matrices: pose.matrices, alphas: pose.alphas, seqName, frame: req.frame };
+
+		rebuildModelPanel();
+		panelControls?.updatePose(pose.alphas, seqName, req.frame);
+
+		rebuildAnimPanel();
+
+		// The user picked another LOD while this model was loading.
+		const want = pickLOD(model.lods, wantLOD);
+		if (want !== lodIndex) {
+			selectLOD(want);
+		}
+	}
+
+	/** rebuildModelPanel re-renders the model panel for the current model and LOD. */
+	function rebuildModelPanel() {
+		if (!currentModel) {
+			return;
+		}
+		panelControls = renderModelPanel(panelEl, currentModel, {
 			onSelectEdition(path) {
 				const idx = models.findIndex((m) => m.path === path);
 				if (idx !== -1) {
@@ -298,13 +329,10 @@ async function main() {
 			},
 			player: currentPlayer,
 			onSelectPlayer: selectPlayer,
-			textures: textureInfos,
+			lodIndex: currentLOD,
+			onSelectLOD: selectLOD,
+			textures: currentTextureInfos,
 		});
-
-		const seqName = seqIndex !== -1 ? model.sequences[seqIndex].name : "";
-		panelControls.updatePose(pose.alphas, seqName, req.frame);
-
-		rebuildAnimPanel();
 	}
 
 	const poseScheduler = new PoseScheduler(
@@ -335,6 +363,7 @@ async function main() {
 			if (currentModel === req.model) {
 				renderer.setPose(pose.matrices, pose.alphas);
 				const seqName = currentSeqIndex !== -1 ? currentModel.sequences[currentSeqIndex].name : "";
+				lastPose = { matrices: pose.matrices, alphas: pose.alphas, seqName, frame: req.frame };
 				if (panelControls) {
 					panelControls.updatePose(pose.alphas, seqName, req.frame);
 				}
@@ -362,22 +391,23 @@ async function main() {
 
 	/**
 	 * collectTextureRefs gathers every distinct texture/mask TextureRef used
-	 * by model's lowest-LOD geosets' layers, keyed by content key, plus
+	 * by the geosets with offsets (one LOD's), keyed by content key, plus
 	 * which ckeys are ever used as a plain texture vs. as a mask (a ckey
 	 * used only as a mask and whose DDS isn't DXT5 is never uploaded - it
 	 * would be unmasked on the desktop too).
 	 * @param {Model} model
+	 * @param {(?MeshOffsets)[]} offsets - parallel to model.geosets
 	 * @returns {{refs: Map<string, TextureRef>, asTexture: Set<string>, asMask: Set<string>}}
 	 */
-	function collectTextureRefs(model) {
+	function collectTextureRefs(model, offsets) {
 		/** @type {Map<string, TextureRef>} */
 		const refs = new Map();
 		/** @type {Set<string>} */
 		const asTexture = new Set();
 		/** @type {Set<string>} */
 		const asMask = new Set();
-		for (const g of model.geosets) {
-			if (g.mesh === null) {
+		for (const [i, g] of model.geosets.entries()) {
+			if (offsets[i] === null) {
 				continue;
 			}
 			for (const l of g.layers) {
@@ -392,6 +422,95 @@ async function main() {
 			}
 		}
 		return { refs, asTexture, asMask };
+	}
+
+	/**
+	 * loadLOD fetches the mesh and textures of model's LOD at lodIndex (-1:
+	 * the top-level mesh, an empty one for a model without geosets) and
+	 * uploads the textures. Returns null when stale() turned true meanwhile,
+	 * after freeing what it uploaded.
+	 * @param {Model} model
+	 * @param {number} lodIndex
+	 * @param {() => boolean} stale
+	 * @returns {Promise<{meshBuffer: ArrayBuffer, decoded: DecodedGeoset[], textures: Map<string, UploadedTexture>, textureInfos: TextureInfo[]} | null>}
+	 */
+	async function loadLOD(model, lodIndex, stale) {
+		const meshRef = lodIndex !== -1 ? model.lods[lodIndex].mesh : model.mesh;
+		const offsets = lodIndex !== -1 ? model.lods[lodIndex].offsets : model.geosets.map((g) => g.mesh);
+		const meshBuffer = await getMesh(meshRef);
+		if (stale()) {
+			return null;
+		}
+
+		const { refs, asTexture, asMask } = collectTextureRefs(model, offsets);
+		const entries = await Promise.all(
+			[...refs.entries()].map(async ([ckey, ref]) => {
+				const buffer = await getTexture(ref);
+				return /** @type {[string, TextureRef, ArrayBuffer]} */ ([ckey, ref, buffer]);
+			}),
+		);
+		if (stale()) {
+			return null;
+		}
+
+		/** @type {Map<string, UploadedTexture>} */
+		const textures = new Map();
+		/** @type {TextureInfo[]} */
+		const textureInfos = [];
+		for (const [ckey, ref, buffer] of entries) {
+			const dds = parseDDS(buffer);
+			const maskOnly = asMask.has(ckey) && !asTexture.has(ckey);
+			if (maskOnly && dds.format !== "DXT5") {
+				textureInfos.push({ path: ref.path, format: dds.format, width: dds.width, height: dds.height, mips: dds.mips.length, uploadPath: "mask ignored: not DXT5" });
+				continue;
+			}
+			const uploaded = uploadTexture(gl, exts, buffer);
+			textures.set(ckey, uploaded);
+			textureInfos.push({ path: ref.path, format: uploaded.format, width: uploaded.width, height: uploaded.height, mips: uploaded.mips, uploadPath: uploaded.path });
+		}
+		if (stale()) {
+			for (const t of textures.values()) {
+				gl.deleteTexture(t.texture);
+			}
+			return null;
+		}
+
+		const decoded = decodeMesh(model, meshBuffer, offsets);
+
+		return { meshBuffer, decoded, textures, textureInfos };
+	}
+
+	/**
+	 * selectLOD switches the current model to its LOD at index, keeping the
+	 * camera, sequence and playback; the last pose is applied at once.
+	 * @param {number} index
+	 */
+	async function selectLOD(index) {
+		const model = currentModel;
+		if (!model || !lastPose || index < 0 || index >= model.lods.length) {
+			return;
+		}
+		wantLOD = model.lods[index].lod;
+		const token = ++lodToken;
+		const stale = () => token !== lodToken || currentModel !== model;
+
+		try {
+			const loaded = await loadLOD(model, index, stale);
+			if (loaded === null || !lastPose) {
+				return;
+			}
+			renderer.setModel(loaded.meshBuffer, loaded.decoded, model, loaded.textures);
+			renderer.setPose(lastPose.matrices, lastPose.alphas);
+			currentLOD = index;
+			currentTextureInfos = loaded.textureInfos;
+			rebuildModelPanel();
+			panelControls?.updatePose(lastPose.alphas, lastPose.seqName, lastPose.frame);
+		} catch (err) {
+			if (stale()) {
+				return;
+			}
+			console.error("main: selectLOD:", err);
+		}
 	}
 
 	/** @param {number} modelIndex */
@@ -419,52 +538,19 @@ async function main() {
 			if (token !== loadToken) {
 				return;
 			}
-			const meshBuffer = await getMesh(model.mesh);
-			if (token !== loadToken) {
+			const lodIndex = pickLOD(model.lods, wantLOD);
+			const loaded = await loadLOD(model, lodIndex, () => token !== loadToken);
+			if (loaded === null) {
 				return;
 			}
-
-			const { refs, asTexture, asMask } = collectTextureRefs(model);
-			const entries = await Promise.all(
-				[...refs.entries()].map(async ([ckey, ref]) => {
-					const buffer = await getTexture(ref);
-					return /** @type {[string, TextureRef, ArrayBuffer]} */ ([ckey, ref, buffer]);
-				}),
-			);
-			if (token !== loadToken) {
-				return;
-			}
-
-			/** @type {Map<string, UploadedTexture>} */
-			const textures = new Map();
-			/** @type {TextureInfo[]} */
-			const textureInfos = [];
-			for (const [ckey, ref, buffer] of entries) {
-				const dds = parseDDS(buffer);
-				const maskOnly = asMask.has(ckey) && !asTexture.has(ckey);
-				if (maskOnly && dds.format !== "DXT5") {
-					textureInfos.push({ path: ref.path, format: dds.format, width: dds.width, height: dds.height, mips: dds.mips.length, uploadPath: "mask ignored: not DXT5" });
-					continue;
-				}
-				const uploaded = uploadTexture(gl, exts, buffer);
-				textures.set(ckey, uploaded);
-				textureInfos.push({ path: ref.path, format: uploaded.format, width: uploaded.width, height: uploaded.height, mips: uploaded.mips, uploadPath: uploaded.path });
-			}
-			if (token !== loadToken) {
-				for (const t of textures.values()) {
-					gl.deleteTexture(t.texture);
-				}
-				return;
-			}
-
-			const decoded = decodeMesh(model, meshBuffer, model.geosets.map((g) => g.mesh));
+			const { meshBuffer, decoded, textures, textureInfos } = loaded;
 
 			const seqIndex = pickSequence(model, currentSeqRef);
 			const frame = seqIndex !== -1 ? sequenceRange(model.sequences[seqIndex]).start : 0;
 			play.frame = frame;
 
 			// The rAF loop below re-wants this every tick until it resolves.
-			pending = { model, meshBuffer, decoded, textures, textureInfos, seqIndex, frame };
+			pending = { model, lodIndex, meshBuffer, decoded, textures, textureInfos, seqIndex, frame };
 		} catch (err) {
 			if (token !== loadToken) {
 				return;
