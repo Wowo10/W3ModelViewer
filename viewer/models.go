@@ -107,6 +107,13 @@ type modelPicker struct {
 	rows      []treeRow // the tree's rows currently visible, rebuilt by refresh and by toggling a directory
 	selected  int       // index into models, -1 = none
 
+	showEmpty bool   // show models with no geosets, off by default
+	empty     []bool // per model, catalog known and has 0 geosets, updated by refresh
+	hidden    int    // models matching filter/edition but hidden by !showEmpty, set by refresh
+
+	scanDone         int     // catalog.Progress() done as of the last scan-triggered refresh
+	sinceScanRefresh float64 // seconds accumulated since that refresh
+
 	loaded int // index into models of the model currently in model, -1 = none
 	model  selectedModel
 
@@ -201,17 +208,30 @@ func newModelPicker(storage *casc.Storage, r root.Root, cat *catalog.Catalog) *m
 	return p
 }
 
-// refresh recomputes visible and shown from filter and edition, then the
-// tree's counts and rows.
+// refresh updates empty from the catalog, then recomputes visible and shown
+// from filter, edition and (unless showEmpty) empty, then the tree's counts
+// and rows.
 func (p *modelPicker) refresh() {
 	filter := strings.ToLower(p.filter)
 	edition := p.editions[p.edition]
 	p.filtering = filter != ""
 
+	if p.empty == nil {
+		p.empty = make([]bool, len(p.models))
+	}
+	if p.catalog != nil {
+		for i, m := range p.models {
+			if info, ok := p.catalog.Lookup(m.entry.CKey); ok {
+				p.empty[i] = info.Geosets == 0
+			}
+		}
+	}
+
 	p.visible = p.visible[:0]
 	if p.shown == nil {
 		p.shown = make([]bool, len(p.models))
 	}
+	p.hidden = 0
 	for i, m := range p.models {
 		match := true
 		if filter != "" && !strings.Contains(m.lower, filter) {
@@ -219,6 +239,10 @@ func (p *modelPicker) refresh() {
 		}
 		if edition != "all" && string(m.entry.Variant.Edition) != edition {
 			match = false
+		}
+		if match && !p.showEmpty && p.empty[i] {
+			match = false
+			p.hidden++
 		}
 		p.shown[i] = match
 		if match {
@@ -386,10 +410,31 @@ func variantLabel(entry root.Entry) string {
 	return label
 }
 
+// pollScan refreshes the model list when the scan's progress has changed
+// and either 0.5s have passed since the last such refresh or the scan has
+// just finished, so rows don't churn every frame.
+func (p *modelPicker) pollScan(dt float64) {
+	done, _, finished := p.catalog.Progress()
+	if done == p.scanDone {
+		return
+	}
+
+	p.sinceScanRefresh += dt
+	if p.sinceScanRefresh < 0.5 && !finished {
+		return
+	}
+
+	p.refresh()
+	p.scanDone = done
+	p.sinceScanRefresh = 0
+}
+
 // draw shows the "Models" window: a filter box, an edition combo and a
 // collapsible, clipped directory tree of matching models (model counts per
 // directory; while filtering, every branch containing a match is open).
 func (p *modelPicker) draw() {
+	p.pollScan(float64(imgui.CurrentIO().DeltaTime()))
+
 	imgui.SetNextWindowPosV(imgui.Vec2{X: 10, Y: 10}, imgui.CondFirstUseEver, imgui.Vec2{})
 	imgui.SetNextWindowSizeV(imgui.Vec2{X: 480, Y: 660}, imgui.CondFirstUseEver)
 	if imgui.Begin("Models") {
@@ -397,11 +442,23 @@ func (p *modelPicker) draw() {
 		if imgui.ComboStrarr("edition", &p.edition, p.editions, int32(len(p.editions))) {
 			changed = true
 		}
+		if imgui.Checkbox("show models without geometry", &p.showEmpty) {
+			changed = true
+		}
 		if changed {
 			p.refresh()
 		}
 
-		imgui.Text(fmt.Sprintf("%d of %d models", len(p.visible), len(p.models)))
+		if done, total, finished := p.catalog.Progress(); !finished {
+			imgui.ProgressBar(float32(done) / float32(max(total, 1)))
+			imgui.Text(fmt.Sprintf("scanning models %d / %d", done, total))
+		}
+
+		if p.hidden > 0 {
+			imgui.Text(fmt.Sprintf("%d of %d models (%d without geometry hidden)", len(p.visible), len(p.models), p.hidden))
+		} else {
+			imgui.Text(fmt.Sprintf("%d of %d models", len(p.visible), len(p.models)))
+		}
 		imgui.Separator()
 
 		if imgui.BeginChildStrV("##modelList", imgui.Vec2{}, imgui.ChildFlagsNone, 0) {
