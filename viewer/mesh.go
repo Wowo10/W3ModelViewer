@@ -238,13 +238,12 @@ type modelMesh struct {
 	textures map[[16]byte]uint32
 }
 
-// uploadMesh uploads every geoset at the model's lowest LOD (visible or not,
-// since per-pose alpha can show any of them later) to VAO/VBO/IBO pairs:
-// position+normal (zero-filled when the geoset has no normals) interleaved,
-// followed by each of the geoset's UV sets as its own packed block, in a
-// single vertex buffer per geoset. mdx.LowestLOD is computed over every
-// geoset, visible or not, so hiding geosets never changes which LOD is
-// rendered. The bounds (mesh.min/max, mesh.bounded) only cover geosets with
+// uploadMesh uploads every geoset at lod (visible or not, since per-pose
+// alpha can show any of them later) to VAO/VBO/IBO pairs: position+normal
+// (zero-filled when the geoset has no normals) interleaved, followed by
+// each of the geoset's UV sets as its own packed block, in a single vertex
+// buffer per geoset. The caller picks lod; hiding geosets never changes it.
+// The bounds (mesh.min/max, mesh.bounded) only cover geosets with
 // alphas[i] > 0, so the camera frames what's actually shown at upload time.
 // For each layer whose source is texture.Texture, its DDS is read through
 // storage and uploaded once per content key, shared across geosets and
@@ -253,9 +252,7 @@ type modelMesh struct {
 // Geosets are returned opaque first (first layer's filter none/transparent,
 // or no layers), then blended, each group ordered by priority plane
 // ascending then geoset index. GL must be current.
-func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, layers [][]texture.Layer, priority []int32) modelMesh {
-	lod := mdx.LowestLOD(geosets)
-
+func uploadMesh(storage *casc.Storage, geosets []mdx.Geoset, alphas []float32, layers [][]texture.Layer, priority []int32, lod uint32) modelMesh {
 	mesh := modelMesh{lod: lod, textures: map[[16]byte]uint32{}}
 
 	for i, g := range geosets {

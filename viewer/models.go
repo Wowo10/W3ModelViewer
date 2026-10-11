@@ -29,6 +29,10 @@ type selectedModel struct {
 	priority []int32           // one per geoset, its material's priority plane
 	layers   [][]texture.Layer // one slice per geoset, one texture.Layer per material layer
 
+	lods      []mdx.LODTotal // this model's LODs with totals, built once by loadModel
+	lodLabels []string       // one per entry in lods, e.g. "LOD 1: 11566 vertices, 15686 triangles"
+	lod       int32          // index into lods of the LOD to render, -1 when there are no geosets
+
 	skeleton    mdx.Skeleton
 	pivots      int // len(mdx.Model.Pivots()), the matrices array size
 	sequences   []mdx.Sequence
@@ -135,9 +139,10 @@ type modelCounts struct {
 	vertices, triangles int
 }
 
-// countGeosets computes modelCounts for a model's version and geosets.
-func countGeosets(version uint32, geosets []mdx.Geoset) modelCounts {
-	c := modelCounts{version: version, geosets: len(geosets), lods: mdx.LODTotals(geosets)}
+// countGeosets computes modelCounts for a model's version and geosets,
+// given its LODTotals (the caller's, so it isn't recomputed).
+func countGeosets(version uint32, geosets []mdx.Geoset, lods []mdx.LODTotal) modelCounts {
+	c := modelCounts{version: version, geosets: len(geosets), lods: lods}
 	for _, g := range geosets {
 		c.vertices += g.VertexCount()
 		c.triangles += g.TriangleCount()
@@ -292,6 +297,12 @@ func (p *modelPicker) loadModel(idx int) {
 		seqLabels[i] = fmt.Sprintf("%s (%d ms) [%d-%d]", s.Name, end-start, start, end)
 	}
 
+	lods := mdx.LODTotals(geosets)
+	lodLabels := make([]string, len(lods))
+	for i, t := range lods {
+		lodLabels[i] = fmt.Sprintf("LOD %d: %d vertices, %d triangles", t.LOD, t.Vertices, t.Triangles)
+	}
+
 	p.model = selectedModel{
 		path:        entry.Path,
 		name:        entry.Name,
@@ -300,6 +311,9 @@ func (p *modelPicker) loadModel(idx int) {
 		geosets:     geosets,
 		priority:    priority,
 		layers:      layers,
+		lods:        lods,
+		lodLabels:   lodLabels,
+		lod:         int32(pickLOD(lods, p.lod)),
 		skeleton:    skeleton,
 		pivots:      pivots,
 		sequences:   sequences,
@@ -320,7 +334,7 @@ func (p *modelPicker) loadModel(idx int) {
 	p.model.setPose(seq, start, uint32(uint64(p.play.global)))
 
 	p.loaded = idx
-	p.counts[entry.CKey] = countGeosets(m.Version, geosets)
+	p.counts[entry.CKey] = countGeosets(m.Version, geosets, lods)
 }
 
 // loadGroup recomputes group as every edition of models[idx]'s asset,
@@ -355,7 +369,8 @@ func (p *modelPicker) countEdition(idx int) {
 
 	data := p.storage.ReadByCKey(entry.CKey)
 	m := mdx.Read(data)
-	p.counts[entry.CKey] = countGeosets(m.Version, m.Geosets())
+	geosets := m.Geosets()
+	p.counts[entry.CKey] = countGeosets(m.Version, geosets, mdx.LODTotals(geosets))
 }
 
 // variantLabel names an edition radio button, e.g. "classic" or
@@ -546,6 +561,13 @@ func (p *modelPicker) drawModel() {
 
 			imgui.ComboStrarr("team colour", &p.player, playerNames, int32(len(playerNames)))
 
+			if len(m.lods) > 1 {
+				if imgui.ComboStrarr("LOD", &p.model.lod, m.lodLabels, int32(len(m.lodLabels))) {
+					p.lod = m.lods[p.model.lod].LOD
+				}
+			}
+			m = p.model
+
 			imgui.Text(fmt.Sprintf("Version: %d", m.version))
 			imgui.Text(fmt.Sprintf("Chunks: %d", m.chunks))
 			imgui.Text(fmt.Sprintf("Geosets: %d", len(m.geosets)))
@@ -556,7 +578,7 @@ func (p *modelPicker) drawModel() {
 			}
 
 			if len(m.geosets) > 0 {
-				lod := mdx.LowestLOD(m.geosets)
+				lod := m.lods[m.lod].LOD
 				atLOD, drawn := 0, 0
 				for i, g := range m.geosets {
 					if g.LOD != lod {
@@ -580,16 +602,18 @@ func (p *modelPicker) drawModel() {
 
 			if len(m.geosets) > 0 {
 				imgui.Separator()
-				if imgui.BeginTableV("##geosets", 7, imgui.TableFlagsScrollX|imgui.TableFlagsScrollY|imgui.TableFlagsRowBg|imgui.TableFlagsBorders, imgui.Vec2{}, 0) {
+				if imgui.BeginTableV("##geosets", 8, imgui.TableFlagsScrollX|imgui.TableFlagsScrollY|imgui.TableFlagsRowBg|imgui.TableFlagsBorders, imgui.Vec2{}, 0) {
 					imgui.TableSetupColumn("geoset")
 					imgui.TableSetupColumn("material")
 					imgui.TableSetupColumn("lod")
+					imgui.TableSetupColumn("drawn")
 					imgui.TableSetupColumn("vertices")
 					imgui.TableSetupColumn("triangles")
 					imgui.TableSetupColumn("alpha")
 					imgui.TableSetupColumn("layers")
 					imgui.TableHeadersRow()
 
+					renderedLOD := m.lods[m.lod].LOD
 					var totalVertices, totalTriangles int
 					for i, g := range m.geosets {
 						imgui.TableNextRow()
@@ -599,6 +623,15 @@ func (p *modelPicker) drawModel() {
 						imgui.Text(fmt.Sprintf("%d", g.MaterialID))
 						imgui.TableNextColumn()
 						imgui.Text(fmt.Sprintf("%d", g.LOD))
+						imgui.TableNextColumn()
+						switch {
+						case g.LOD != renderedLOD:
+							imgui.TextUnformatted("")
+						case m.alphas[i] > 0:
+							imgui.TextUnformatted("yes")
+						default:
+							imgui.TextUnformatted("hidden")
+						}
 						imgui.TableNextColumn()
 						imgui.Text(fmt.Sprintf("%d", g.VertexCount()))
 						imgui.TableNextColumn()
@@ -619,6 +652,7 @@ func (p *modelPicker) drawModel() {
 					imgui.TableNextRow()
 					imgui.TableNextColumn()
 					imgui.TextUnformatted("total")
+					imgui.TableNextColumn()
 					imgui.TableNextColumn()
 					imgui.TableNextColumn()
 					imgui.TableNextColumn()

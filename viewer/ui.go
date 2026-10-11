@@ -51,23 +51,30 @@ func newUIState(storage *casc.Storage, r root.Root) *uiState {
 	}
 }
 
-// syncMesh uploads the currently loaded model's geosets when the picker has
-// loaded a different model than the mesh was built from, releasing the
-// previous mesh first. The camera is only reframed when the new mesh is of a
-// different asset than the one last framed (by entry.Name, case-
-// insensitively), so switching editions of the same asset keeps the camera.
-// It reports whether the mesh was rebuilt, so syncPose knows to upload the
-// new mesh's pose even if model.pose happens to match the last one it saw.
+// syncMesh uploads the currently loaded model's geosets at its rendered LOD
+// when the picker has loaded a different model than the mesh was built
+// from, or the loaded model's rendered LOD differs from the mesh's,
+// releasing the previous mesh first. The camera is only reframed when the
+// new mesh is of a different asset than the one last framed (by
+// entry.Name, case-insensitively), so switching editions of the same asset,
+// or switching LOD, keeps the camera. It reports whether the mesh was
+// rebuilt, so syncPose knows to upload the new mesh's pose even if
+// model.pose happens to match the last one it saw.
 func (ui *uiState) syncMesh() bool {
-	if ui.models.loaded == ui.meshFor {
+	model := &ui.models.model
+	var lod uint32
+	if model.lod != -1 {
+		lod = model.lods[model.lod].LOD
+	}
+	if ui.models.loaded == ui.meshFor && lod == ui.mesh.lod {
 		return false
 	}
 
 	ui.mesh.release()
-	ui.mesh = uploadMesh(ui.storage, ui.models.model.geosets, ui.models.model.alphas, ui.models.model.layers, ui.models.model.priority)
-	if ui.mesh.bounded && !strings.EqualFold(ui.models.model.name, ui.framedName) {
+	ui.mesh = uploadMesh(ui.storage, model.geosets, model.alphas, model.layers, model.priority, lod)
+	if ui.mesh.bounded && !strings.EqualFold(model.name, ui.framedName) {
 		ui.camera.frame(ui.mesh.min, ui.mesh.max)
-		ui.framedName = ui.models.model.name
+		ui.framedName = model.name
 	}
 	ui.meshFor = ui.models.loaded
 	return true
