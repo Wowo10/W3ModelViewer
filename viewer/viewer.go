@@ -15,6 +15,7 @@ import (
 	"github.com/veandco/go-sdl2/sdl"
 	"modelView/extract/casc"
 	"modelView/extract/root"
+	"modelView/model/catalog"
 )
 
 // Config describes the window to open.
@@ -33,8 +34,10 @@ func DefaultConfig() Config {
 const glslVersion = "#version 150"
 
 // Run opens the window and pumps events until the user closes it. storage and
-// r let the UI read model files; the viewer does no file I/O of its own.
-func Run(cfg Config, storage *casc.Storage, r root.Root) error {
+// r let the UI read model files; the viewer does no file I/O of its own. cat
+// is the background model scan started alongside it, polled by the Models
+// window.
+func Run(cfg Config, storage *casc.Storage, r root.Root, cat *catalog.Catalog) error {
 	// The GL context is bound to one OS thread, so this goroutine must stay put.
 	runtime.LockOSThread()
 
@@ -78,7 +81,7 @@ func Run(cfg Config, storage *casc.Storage, r root.Root) error {
 	}
 	defer opengl3.Shutdown()
 
-	ui := newUIState(storage, r)
+	ui := newUIState(storage, r, cat)
 	defer ui.release()
 
 	for !ui.quit {

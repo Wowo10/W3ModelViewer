@@ -8,6 +8,7 @@ import (
 	"github.com/AllenDang/cimgui-go/imgui"
 	"modelView/extract/casc"
 	"modelView/extract/root"
+	"modelView/model/catalog"
 	"modelView/model/mdx"
 	"modelView/model/texture"
 )
@@ -91,6 +92,7 @@ type modelPicker struct {
 	storage  *casc.Storage
 	root     root.Root
 	resolver *texture.Resolver
+	catalog  *catalog.Catalog
 
 	models   []modelEntry
 	byPath   map[string]int // models[byPath[path]].entry.Path == path
@@ -166,8 +168,8 @@ func pickLOD(lods []mdx.LODTotal, want uint32) int {
 
 // newModelPicker collects every root entry whose Name ends in ".mdx" (case-
 // insensitive), sorted by Path, and the editions present among them.
-func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
-	p := &modelPicker{storage: storage, root: r, resolver: texture.NewResolver(r), selected: -1, loaded: -1, counts: map[[16]byte]modelCounts{}, play: newPlayback()}
+func newModelPicker(storage *casc.Storage, r root.Root, cat *catalog.Catalog) *modelPicker {
+	p := &modelPicker{storage: storage, root: r, resolver: texture.NewResolver(r), catalog: cat, selected: -1, loaded: -1, counts: map[[16]byte]modelCounts{}, play: newPlayback()}
 	p.model.lod = -1
 
 	seen := map[root.Edition]bool{}

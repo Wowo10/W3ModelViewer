@@ -14,6 +14,7 @@ import (
 	"modelView/extract/encoding"
 	"modelView/extract/idxPackages"
 	"modelView/extract/root"
+	"modelView/model/catalog"
 	"modelView/model/mdx"
 	"modelView/model/texture"
 	"modelView/viewer"
@@ -101,7 +102,7 @@ func main() {
 	if *webFlag {
 		web.New(storage, r).Serve(*addr)
 	} else if *view || !output {
-		runViewer(storage, r)
+		runViewer(storage, r, bInfo.GetBuildKey())
 	}
 }
 
@@ -509,8 +510,9 @@ func decodeKey(key string) []byte {
 	return decoded
 }
 
-func runViewer(storage *casc.Storage, r root.Root) {
-	if err := viewer.Run(viewer.DefaultConfig(), storage, r); err != nil {
+func runViewer(storage *casc.Storage, r root.Root, buildKey string) {
+	cat := catalog.Start(storage, r, buildKey, catalog.CacheDir())
+	if err := viewer.Run(viewer.DefaultConfig(), storage, r, cat); err != nil {
 		fmt.Fprintln(os.Stderr, "viewer:", err)
 		os.Exit(1)
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/go-gl/gl/v3.2-core/gl"
 	"modelView/extract/casc"
 	"modelView/extract/root"
+	"modelView/model/catalog"
 	"modelView/model/texture"
 )
 
@@ -38,11 +39,11 @@ type teamTextures struct {
 	player      int32 // which player these are, -1 = none loaded yet
 }
 
-func newUIState(storage *casc.Storage, r root.Root) *uiState {
+func newUIState(storage *casc.Storage, r root.Root, cat *catalog.Catalog) *uiState {
 	return &uiState{
 		storage:    storage,
 		root:       r,
-		models:     newModelPicker(storage, r),
+		models:     newModelPicker(storage, r, cat),
 		clearColor: [3]float32{0.10, 0.11, 0.13},
 		program:    newMeshProgram(),
 		meshFor:    -1,
