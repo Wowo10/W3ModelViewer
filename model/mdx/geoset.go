@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"sort"
 )
 
 // Geoset is one geoset of a GEOS chunk. See the GEOS layout comment in
@@ -35,6 +36,45 @@ func LowestLOD(geosets []Geoset) uint32 {
 		}
 	}
 	return lod
+}
+
+// LODTotal is the geoset, vertex and triangle count of one LOD value.
+type LODTotal struct {
+	LOD       uint32
+	Geosets   int
+	Vertices  int
+	Triangles int
+}
+
+// LODTotals returns one entry per distinct LOD value present among geosets,
+// ascending by LOD, each summing the geosets at that LOD. It returns nil
+// when there are no geosets. LODTotals(g)[0].LOD == LowestLOD(g) whenever
+// LODTotals(g) is non-empty.
+func LODTotals(geosets []Geoset) []LODTotal {
+	if len(geosets) == 0 {
+		return nil
+	}
+
+	byLOD := make(map[uint32]*LODTotal)
+	var lods []uint32
+	for _, g := range geosets {
+		t, ok := byLOD[g.LOD]
+		if !ok {
+			t = &LODTotal{LOD: g.LOD}
+			byLOD[g.LOD] = t
+			lods = append(lods, g.LOD)
+		}
+		t.Geosets++
+		t.Vertices += g.VertexCount()
+		t.Triangles += g.TriangleCount()
+	}
+
+	sort.Slice(lods, func(i, j int) bool { return lods[i] < lods[j] })
+	totals := make([]LODTotal, len(lods))
+	for i, lod := range lods {
+		totals[i] = *byLOD[lod]
+	}
+	return totals
 }
 
 // VertexCount returns the number of vertices in the geoset.
