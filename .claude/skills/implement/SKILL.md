@@ -69,8 +69,9 @@ imports this module, see the recipe in the `/plan` skill).
 4. For performance work, time both binaries over several runs and report the
    range. If a panic stops the run early, time throwaway copies in the
    scratchpad with that panic disabled — never edit the real code for this.
-5. The viewer (`go run .` with no output flag) needs a display; if you can't open it, say it was only
-   compile-checked and leave `[owner]` criteria to the owner.
+5. The viewer (`make run`, or the binary with no output flag) needs a display and
+   someone to close it; don't start it, say it was only compile-checked and leave
+   `[owner]` criteria to the owner. Never run the program without an output flag (`-list`, `-variants`, `-extract`, `-mdxinfo`, `-survey`): with none it opens the desktop viewer, which blocks until someone closes its window. Old "default run unchanged" checks no longer apply; compare output flags instead. `-web` serves until killed, so run it in the background with a timeout.
 
 ## Report
 
