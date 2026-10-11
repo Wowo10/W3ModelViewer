@@ -173,7 +173,9 @@ func (s *setupState) open(app *appState) {
 		return
 	}
 
-	if err := settings.Save(s.start.SettingsPath, settings.Settings{InstallPath: abs}); err != nil {
+	st := s.start.Settings
+	st.InstallPath = abs
+	if err := settings.Save(s.start.SettingsPath, st); err != nil {
 		s.saveErr = err
 		return
 	}

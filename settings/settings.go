@@ -12,9 +12,18 @@ import (
 // FileName is the config file's name.
 const FileName = "modelViewer.json"
 
+// DefaultPort is the web viewer's port when modelViewer.json has none.
+const DefaultPort = 8001
+
 // Settings is the content of modelViewer.json.
 type Settings struct {
 	InstallPath string `json:"installPath"`
+	Port        int    `json:"port"`
+}
+
+// Defaults returns the Settings of a file that has no fields yet.
+func Defaults() Settings {
+	return Settings{Port: DefaultPort}
 }
 
 // Path returns where modelViewer.json lives: next to the running
@@ -66,24 +75,25 @@ func outside(rel string) bool {
 	return rel == ".." || len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator)
 }
 
-// Load reads path. A missing file is created with an empty install path and
-// returned as such. An unreadable or invalid file is left untouched; Load
-// returns an empty Settings and an error naming path.
+// Load reads path. A missing file is created with Defaults and returned as
+// such; fields missing from an existing file keep their Defaults value (the
+// file is not rewritten). An unreadable or invalid file is left untouched;
+// Load returns Defaults and an error naming path.
 func Load(path string) (Settings, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		if err := Save(path, Settings{}); err != nil {
-			return Settings{}, err
+		if err := Save(path, Defaults()); err != nil {
+			return Defaults(), err
 		}
-		return Settings{}, nil
+		return Defaults(), nil
 	}
 	if err != nil {
-		return Settings{}, fmt.Errorf("%s: %w", path, err)
+		return Defaults(), fmt.Errorf("%s: %w", path, err)
 	}
 
-	var s Settings
+	s := Defaults()
 	if err := json.Unmarshal(data, &s); err != nil {
-		return Settings{}, fmt.Errorf("%s: %w", path, err)
+		return Defaults(), fmt.Errorf("%s: %w", path, err)
 	}
 
 	return s, nil

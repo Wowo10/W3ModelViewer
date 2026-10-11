@@ -3,6 +3,7 @@ package settings
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,8 +77,8 @@ func TestLoadCreatesMissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.InstallPath != "" {
-		t.Errorf("InstallPath = %q, want empty", s.InstallPath)
+	if s != Defaults() {
+		t.Errorf("Settings = %+v, want %+v", s, Defaults())
 	}
 
 	data, err := os.ReadFile(path)
@@ -92,8 +93,11 @@ func TestLoadCreatesMissingFile(t *testing.T) {
 	if s2 != s {
 		t.Errorf("reloaded Settings = %+v, want %+v", s2, s)
 	}
-	if string(data) != mustMarshal(t, Settings{}) {
-		t.Errorf("created file = %q, want %q", data, mustMarshal(t, Settings{}))
+	if string(data) != mustMarshal(t, Defaults()) {
+		t.Errorf("created file = %q, want %q", data, mustMarshal(t, Defaults()))
+	}
+	if !strings.Contains(string(data), `"port": 8001`) {
+		t.Errorf("created file = %q, want \"port\": 8001", data)
 	}
 }
 
@@ -108,8 +112,8 @@ func TestLoadCorruptFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load on corrupt file: want error, got nil")
 	}
-	if s != (Settings{}) {
-		t.Errorf("Settings on corrupt file = %+v, want empty", s)
+	if s != Defaults() {
+		t.Errorf("Settings on corrupt file = %+v, want %+v", s, Defaults())
 	}
 
 	data, err := os.ReadFile(path)
@@ -123,7 +127,7 @@ func TestLoadCorruptFile(t *testing.T) {
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
-	want := Settings{InstallPath: "/opt/Warcraft III"}
+	want := Settings{InstallPath: "/opt/Warcraft III", Port: 9000}
 
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)
