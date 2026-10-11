@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { splitName, leafLabel, buildTree, editionOptions, matchModels, refresh, rows } from "../static/js/tree.js";
+import { splitName, leafLabel, buildTree, editionOptions, matchModels, countLine, refresh, rows } from "../static/js/tree.js";
 
-/** @param {string} path @param {string} name @param {string} edition @param {string[]} [overlays] @returns {import("../static/js/api.js").ModelListEntry} */
-function model(path, name, edition, overlays = []) {
-	return { path, name, edition, overlays };
+/** @param {string} path @param {string} name @param {string} edition @param {string[]} [overlays] @param {?number} [geosets] @returns {import("../static/js/api.js").ModelListEntry} */
+function model(path, name, edition, overlays = [], geosets = null) {
+	return { path, name, edition, overlays, geosets };
 }
 
 // Mixed casing, nested dirs, two editions, a same-named pair, sorted by
@@ -17,6 +17,11 @@ const fixture = [
 	model("War3.w3mod:Buildings/Human/TownHall/TOWNHALL.mdx", "Buildings/Human/TownHall/TOWNHALL.mdx", "classic"),
 	model("War3.w3mod:Root.mdx", "Root.mdx", "classic"),
 ];
+
+/** @param {import("../static/js/api.js").ModelListEntry[]} models @param {string} filter @param {string} edition */
+function shownOf(models, filter, edition) {
+	return matchModels(models, filter, edition, false).shown;
+}
 
 test("splitName: directory and file", () => {
 	assert.deepEqual(splitName("Units/Human/Footman/Footman.mdx"), ["Units/Human/Footman", "Footman.mdx"]);
@@ -71,29 +76,29 @@ test("editionOptions: all + present editions, in root.Editions order", () => {
 });
 
 test("matchModels: lower-cased substring of path, exact edition", () => {
-	const shownAll = matchModels(fixture, "", "all");
+	const shownAll = shownOf(fixture, "", "all");
 	assert.deepEqual(shownAll, [true, true, true, true, true, true]);
 
-	const shownFootman = matchModels(fixture, "footman", "all");
+	const shownFootman = shownOf(fixture, "footman", "all");
 	assert.deepEqual(shownFootman, [true, false, true, false, false, false]);
 
-	const shownReforged = matchModels(fixture, "", "reforged");
+	const shownReforged = shownOf(fixture, "", "reforged");
 	assert.deepEqual(shownReforged, [false, false, true, false, false, false]);
 
-	const shownBoth = matchModels(fixture, "footman", "classic");
+	const shownBoth = shownOf(fixture, "footman", "classic");
 	assert.deepEqual(shownBoth, [true, false, false, false, false, false]);
 });
 
 test("refresh: counts per dir, with and without filter/edition", () => {
 	const t = buildTree(fixture);
-	const shown = matchModels(fixture, "", "all");
+	const shown = shownOf(fixture, "", "all");
 	refresh(t, shown, false);
 
 	assert.equal(t.dirs[0].count, 6); // every model shown, up to the root
 	const unitsIdx = t.dirs[0].children[1];
 	assert.equal(t.dirs[unitsIdx].count, 3); // Footman x2 + Peasant
 
-	const filtered = matchModels(fixture, "footman", "all");
+	const filtered = shownOf(fixture, "footman", "all");
 	refresh(t, filtered, true);
 	assert.equal(t.dirs[0].count, 2);
 	assert.equal(t.dirs[unitsIdx].count, 2);
@@ -103,7 +108,7 @@ test("refresh: counts per dir, with and without filter/edition", () => {
 
 test("rows: empty filter shows only top-level dirs (closed by default)", () => {
 	const t = buildTree(fixture);
-	const shown = matchModels(fixture, "", "all");
+	const shown = shownOf(fixture, "", "all");
 	refresh(t, shown, false);
 	const r = rows(t, shown, false);
 
@@ -121,7 +126,7 @@ test("rows: empty filter shows only top-level dirs (closed by default)", () => {
 
 test("rows: a filter opens every matching branch and hides zero-count dirs", () => {
 	const t = buildTree(fixture);
-	const shown = matchModels(fixture, "footman", "all");
+	const shown = shownOf(fixture, "footman", "all");
 	refresh(t, shown, true);
 	const r = rows(t, shown, true);
 
@@ -137,7 +142,7 @@ test("toggling filterOpen while filtering leaves open alone and vice versa", () 
 	const unitsIdx = t.dirs[0].children[1];
 
 	t.dirs[unitsIdx].open = true;
-	const shown = matchModels(fixture, "", "all");
+	const shown = shownOf(fixture, "", "all");
 	refresh(t, shown, true); // filtering: forces filterOpen true, doesn't touch open
 	assert.equal(t.dirs[unitsIdx].filterOpen, true);
 	assert.equal(t.dirs[unitsIdx].open, true);
@@ -146,4 +151,51 @@ test("toggling filterOpen while filtering leaves open alone and vice versa", () 
 	refresh(t, shown, false); // no longer filtering: doesn't touch filterOpen
 	assert.equal(t.dirs[unitsIdx].filterOpen, false);
 	assert.equal(t.dirs[unitsIdx].open, true);
+});
+
+// Known-empty (1, 3), known-geometry (0, 4) and unknown (2) models.
+const geo = [
+	model("a/Smoke.mdx", "A/Smoke.mdx", "classic", [], 5),
+	model("a/Fx.mdx", "A/Fx.mdx", "classic", [], 0),
+	model("b/Unknown.mdx", "B/Unknown.mdx", "reforged", [], null),
+	model("b/Puff.mdx", "B/Puff.mdx", "reforged", [], 0),
+	model("c/Footman.mdx", "C/Footman.mdx", "definitive", [], 8),
+];
+
+test("matchModels: models without geometry are hidden and counted, unknown ones shown", () => {
+	const m = matchModels(geo, "", "all", false);
+	assert.deepEqual(m.shown, [true, false, true, false, true]);
+	assert.equal(m.hidden, 2);
+});
+
+test("matchModels: showEmpty shows everything and hides nothing", () => {
+	const m = matchModels(geo, "", "all", true);
+	assert.deepEqual(m.shown, [true, true, true, true, true]);
+	assert.equal(m.hidden, 0);
+});
+
+test("matchModels: hidden counts only models matching filter and edition", () => {
+	assert.equal(matchModels(geo, "", "reforged", false).hidden, 1);
+	assert.equal(matchModels(geo, "fx", "all", false).hidden, 1);
+	assert.equal(matchModels(geo, "footman", "all", false).hidden, 0);
+});
+
+test("refresh and rows: directories with only hidden models disappear", () => {
+	const t = buildTree(geo);
+	const { shown } = matchModels(geo, "", "all", false);
+	refresh(t, shown, false);
+
+	assert.equal(t.dirs[0].count, 3);
+	const names = rows(t, shown, false).map((r) => t.dirs[r.dir].name);
+	assert.deepEqual(names, ["A", "B", "C"]); // A keeps Smoke, B keeps Unknown
+
+	const only = geo.map((m) => ({ ...m, geosets: m.name.startsWith("B/") ? 0 : m.geosets }));
+	const m2 = matchModels(only, "", "all", false);
+	refresh(t, m2.shown, false);
+	assert.deepEqual(rows(t, m2.shown, false).map((r) => t.dirs[r.dir].name), ["A", "C"]);
+});
+
+test("countLine: with and without hidden models", () => {
+	assert.equal(countLine(3, 5, 0), "3 of 5 models");
+	assert.equal(countLine(3, 5, 2), "3 of 5 models (2 without geometry hidden)");
 });

@@ -151,24 +151,55 @@ export function editionOptions(models) {
 }
 
 /**
+ * @typedef {Object} Match
+ * @property {boolean[]} shown - per model, whether it's listed
+ * @property {number} hidden - models matching filter and edition but dropped for having no geometry
+ */
+
+/**
  * matchModels returns, per model, whether it's shown: a lower-cased
- * substring match of path, plus edition "all" or an exact match.
+ * substring match of path, plus edition "all" or an exact match, and,
+ * unless showEmpty, a geoset count other than a known 0 (unknown counts
+ * are shown). hidden counts the matching models dropped by that last
+ * condition.
  * @param {ModelListEntry[]} models
  * @param {string} filter
  * @param {string} edition
- * @returns {boolean[]}
+ * @param {boolean} showEmpty
+ * @returns {Match}
  */
-export function matchModels(models, filter, edition) {
+export function matchModels(models, filter, edition, showEmpty) {
 	const lower = filter.toLowerCase();
-	return models.map((m) => {
+	let hidden = 0;
+	const shown = models.map((m) => {
 		if (lower !== "" && !m.path.toLowerCase().includes(lower)) {
 			return false;
 		}
 		if (edition !== "all" && m.edition !== edition) {
 			return false;
 		}
+		if (!showEmpty && m.geosets === 0) {
+			hidden++;
+			return false;
+		}
 		return true;
 	});
+	return { shown, hidden };
+}
+
+/**
+ * countLine is the list's count text, as the desktop's: "N of M models",
+ * with " (K without geometry hidden)" when K > 0.
+ * @param {number} shown
+ * @param {number} total
+ * @param {number} hidden
+ * @returns {string}
+ */
+export function countLine(shown, total, hidden) {
+	if (hidden > 0) {
+		return `${shown} of ${total} models (${hidden} without geometry hidden)`;
+	}
+	return `${shown} of ${total} models`;
 }
 
 /**

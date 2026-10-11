@@ -6,8 +6,8 @@
 // in flight; a newly selected model is held as "pending" and only swapped
 // in once its first pose has arrived, so there's no bind-pose flash.
 
-import { getModels, getModel, getMesh, getTexture, getPose } from "./api.js";
-import { buildTree, editionOptions, matchModels, refresh, rows } from "./tree.js";
+import { getModels, getScan, getModel, getMesh, getTexture, getPose } from "./api.js";
+import { buildTree, editionOptions, matchModels, countLine, refresh, rows } from "./tree.js";
 import { OrbitCamera, wheelSteps } from "./camera.js";
 import { decodeMesh, pickLOD, visibleBounds } from "./mesh.js";
 import { parseDDS } from "./dds.js";
@@ -56,6 +56,10 @@ async function main() {
 
 	const filterInput = /** @type {HTMLInputElement} */ (document.getElementById("filter"));
 	const editionSelect = /** @type {HTMLSelectElement} */ (document.getElementById("edition"));
+	const showEmptyInput = /** @type {HTMLInputElement} */ (document.getElementById("show-empty"));
+	const scanEl = /** @type {HTMLElement} */ (document.getElementById("scan"));
+	const scanBar = /** @type {HTMLProgressElement} */ (document.getElementById("scan-bar"));
+	const scanText = /** @type {HTMLElement} */ (document.getElementById("scan-text"));
 	const countEl = /** @type {HTMLElement} */ (document.getElementById("count"));
 	const scrollEl = /** @type {HTMLElement} */ (document.getElementById("tree"));
 	const spacerEl = /** @type {HTMLElement} */ (document.getElementById("tree-spacer"));
@@ -114,7 +118,7 @@ async function main() {
 
 	let filtering = false;
 	/** @type {boolean[]} */
-	let shown = matchModels(models, "", "all");
+	let shown = matchModels(models, "", "all", false).shown;
 	let selected = -1;
 	let loadToken = 0;
 	let framedName = "";
@@ -143,15 +147,52 @@ async function main() {
 		const filter = filterInput.value;
 		const edition = editionSelect.value;
 		filtering = filter !== "";
-		shown = matchModels(models, filter, edition);
+		const match = matchModels(models, filter, edition, showEmptyInput.checked);
+		shown = match.shown;
 		refresh(tree, shown, filtering);
 		refreshRows();
-		countEl.textContent = `${shown.filter(Boolean).length} of ${models.length} models`;
+		countEl.textContent = countLine(shown.filter(Boolean).length, models.length, match.hidden);
 	}
 
 	filterInput.addEventListener("input", refreshModels);
 	editionSelect.addEventListener("change", refreshModels);
+	showEmptyInput.addEventListener("change", refreshModels);
+
+	/** @param {import("./api.js").ScanProgress} scan */
+	function showScan(scan) {
+		scanEl.hidden = scan.finished;
+		scanBar.max = scan.total;
+		scanBar.value = scan.done;
+		scanText.textContent = `scanning models ${scan.done} / ${scan.total}`;
+	}
+
+	// pollScan re-fetches /api/scan once a second, one request at a time,
+	// until the server's scan has finished; the list is refreshed only when
+	// the scan moved. An error is logged and ends the polling.
+	/** @param {number} lastDone */
+	async function pollScan(lastDone) {
+		try {
+			const scan = await getScan();
+			for (let i = 0; i < models.length; i++) {
+				models[i].geosets = scan.geosets[i];
+			}
+			showScan(scan);
+			if (scan.done !== lastDone || scan.finished) {
+				refreshModels();
+			}
+			if (!scan.finished) {
+				setTimeout(() => pollScan(scan.done), 1000);
+			}
+		} catch (err) {
+			console.error("main: pollScan:", err);
+		}
+	}
+
 	refreshModels();
+	showScan(list.scan);
+	if (!list.scan.finished) {
+		setTimeout(() => pollScan(list.scan.done), 1000);
+	}
 
 	panelEl.textContent = "Select a model";
 

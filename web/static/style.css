@@ -31,6 +31,20 @@ html, body {
 	padding: 4px;
 }
 
+#show-empty-label {
+	margin-bottom: 6px;
+	color: #ccc;
+}
+
+#scan {
+	margin-bottom: 6px;
+	color: #999;
+}
+
+#scan-bar {
+	width: 100%;
+}
+
 #count {
 	margin-bottom: 6px;
 	color: #999;

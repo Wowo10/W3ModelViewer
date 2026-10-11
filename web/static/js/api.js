@@ -24,12 +24,44 @@ export const MAX_INFLUENCES = 8;
  * @property {string} name
  * @property {string} edition - "classic" | "reforged" | "definitive" | "install"
  * @property {string[]} overlays
+ * @property {?number} geosets - geoset count, null until the server's scan reaches the model
+ */
+
+/**
+ * @typedef {Object} ScanProgress
+ * @property {number} done
+ * @property {number} total
+ * @property {boolean} finished
  */
 
 /**
  * @typedef {Object} ModelList
  * @property {ModelListEntry[]} models - sorted by path
  * @property {TeamTextures[]} team - team[i] is player i, 0-24
+ * @property {ScanProgress} scan
+ */
+
+/**
+ * @typedef {Object} Scan - GET /api/scan
+ * @property {number} done
+ * @property {number} total
+ * @property {boolean} finished
+ * @property {(?number)[]} geosets - parallel to ModelList.models
+ */
+
+/**
+ * @typedef {Object} Contents - catalog.Info of a model
+ * @property {number} geosets
+ * @property {number} lods
+ * @property {number} emitters
+ * @property {number} popcornFX
+ * @property {number} ribbons
+ * @property {number} lights
+ * @property {number} attachments
+ * @property {number} cameras
+ * @property {number} bones
+ * @property {number} helpers
+ * @property {string} explain - why there is nothing to draw, "" with geosets
  */
 
 /**
@@ -111,6 +143,7 @@ export const MAX_INFLUENCES = 8;
  * @property {Edition[]} editions - every edition of this asset, including this one
  * @property {MeshRef} mesh - the lowest LOD's mesh (same as lods[0].mesh)
  * @property {LOD[]} lods - ascending by lod, one per distinct geoset LOD; empty without geosets
+ * @property {Contents} contents
  */
 
 /**
@@ -159,6 +192,15 @@ async function checkOK(resp) {
  */
 export async function getModels() {
 	const resp = await checkOK(await fetch("/api/models"));
+	return resp.json();
+}
+
+/**
+ * getScan fetches GET /api/scan.
+ * @returns {Promise<Scan>}
+ */
+export async function getScan() {
+	const resp = await checkOK(await fetch("/api/scan"));
 	return resp.json();
 }
 
