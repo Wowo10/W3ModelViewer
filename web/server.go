@@ -265,17 +265,18 @@ func loopbackOnly(next http.Handler) http.Handler {
 }
 
 // Serve listens on addr (see CheckAddr) and serves Handler until an error
-// occurs, printing the URL to serve on to stdout first. It panics on any
+// occurs, printing the URL and install (the Warcraft III folder being
+// served) to stdout first. It panics on any
 // error from net.Listen or http.Serve. A panic from a handler (e.g. an MDX
 // model with a known parsing bug) is recovered by net/http per request,
 // logged, and the connection dropped.
-func (s *Server) Serve(addr string) {
+func (s *Server) Serve(addr, install string) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("Serving the web viewer on http://%s/\n", ln.Addr())
+	fmt.Printf("Web viewer running at http://%s/ (Warcraft III at %s), Ctrl+C to stop\n", ln.Addr(), install)
 
 	if err := http.Serve(ln, s.Handler()); err != nil {
 		panic(err)

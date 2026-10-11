@@ -43,31 +43,42 @@ func main() {
 	outDir := flag.String("out", ".", "directory to extract into, with -extract")
 	mdxinfo := flag.String("mdxinfo", "", "print the MDX version, chunk list (tag, size), textures (each with its resolved .dds path and format, tagged \"(other edition)\" or \"(by file name)\" when found by a fallback, or \"unresolved\"/\"missing from the archive\"), materials, sequences, default sequence, geoset vertex, triangle and alpha counts and a skinning summary of the model at this full path (including mod chain), with per-LOD totals when a model has several LODs; other output goes to stderr")
 	survey := flag.Bool("survey", false, "read every distinct content key in the root once and print ok/missing/failed totals to stdout")
-	webFlag := flag.Bool("web", false, "serve the web viewer on -addr until stopped instead of opening the desktop viewer; -view is ignored with -web")
-	addr := flag.String("addr", "127.0.0.1:8080", "address for -web to listen on; must be localhost or a loopback IP")
+	webFlag := flag.Bool("web", false, "serve the web viewer on the install and port from modelViewer.json (port 8001 unless set) until stopped instead of opening the desktop viewer; -view is ignored with -web")
+	addr := flag.String("addr", "", "address for -web to listen on, overriding 127.0.0.1:<port> from modelViewer.json; must be localhost or a loopback IP")
 	flag.Usage = func() {
 		w := flag.CommandLine.Output()
 		fmt.Fprintf(w, "Usage of %s:\n", os.Args[0])
-		fmt.Fprintln(w, "Opens the desktop viewer on the install folder saved in modelViewer.json (asking for it when unset). With an output flag (-list, -variants, -extract, -mdxinfo, -survey) it prints that instead and doesn't open the viewer, unless -view is also given; those and -web read wardata/.")
+		fmt.Fprintln(w, "Opens the desktop viewer on the install folder saved in modelViewer.json (asking for it when unset). With an output flag (-list, -variants, -extract, -mdxinfo, -survey) it prints that instead and doesn't open the viewer, unless -view is also given; those read wardata/. -web serves the install and port from modelViewer.json.")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	var webInstall, webListen string
 	if *webFlag {
-		web.CheckAddr(*addr)
+		path, err := settings.Path()
+		if err != nil {
+			panic(err)
+		}
+		s, err := settings.Load(path)
+		if err != nil {
+			panic(err)
+		}
+		webInstall = settings.WebInstall(path, s)
+		webListen = settings.WebAddr(path, s, *addr)
+		web.CheckAddr(webListen)
 	}
 
 	if *list || *variants != "" || *mdxinfo != "" {
 		out = os.Stderr
 	}
 
-	output := *list || *variants != "" || *extract != "" || *mdxinfo != "" || *survey || *webFlag
+	cli := *list || *variants != "" || *extract != "" || *mdxinfo != "" || *survey
 
 	idxPackages.DEBUG = *debug
 	blte.DEBUG = *debug
 	encoding.DEBUG = *debug
 
-	if output {
-		storage, r, buildKey := openArchive("wardata", *verify)
+	if cli {
+		storage, r, _ := openArchive("wardata", *verify)
 		defer storage.Close()
 
 		if *extract != "" {
@@ -89,13 +100,16 @@ func main() {
 		if *survey {
 			surveyFiles(storage, r)
 		}
-
-		if *webFlag {
-			web.New(storage, r, catalog.Start(storage, r, buildKey, catalog.CacheDir())).Serve(*addr)
-		}
 	}
 
-	if *view || !output {
+	if *webFlag {
+		storage, r, buildKey := openArchive(webInstall, *verify)
+		defer storage.Close()
+
+		web.New(storage, r, catalog.Start(storage, r, buildKey, catalog.CacheDir())).Serve(webListen, webInstall)
+	}
+
+	if *view || !(cli || *webFlag) {
 		runViewer(*verify)
 	}
 }
