@@ -483,6 +483,52 @@ func TestLayersPerEdition(t *testing.T) {
 	})
 }
 
+// TestTextureFallbacks checks the texture.Resolve fallbacks (TEX-05) show up
+// in /api/model's layer labels: an other-edition texture for the _DE
+// AncientHydra portrait, a by-file-name texture for _DE DarkHound, and a
+// missing-from-the-archive one for _DE Putress.
+func TestTextureFallbacks(t *testing.T) {
+	// labelContaining returns the label of path's first layer (across every
+	// geoset) whose label contains want, failing the test if none matches.
+	labelContaining := func(t *testing.T, path, want string) string {
+		t.Helper()
+		var m modelResponse
+		if err := json.Unmarshal(getBody(t, "/api/model?path="+url.QueryEscape(path)), &m); err != nil {
+			t.Fatal(err)
+		}
+		for _, g := range m.Geosets {
+			for _, l := range g.Layers {
+				if strings.Contains(l.Label, want) {
+					return l.Label
+				}
+			}
+		}
+		t.Fatalf("%s: no layer label contains %q", path, want)
+		return ""
+	}
+
+	t.Run("other edition", func(t *testing.T) {
+		const path = "War3.w3mod:_DE.w3mod:Units/Creeps/AncientHydra/Hydra_Portrait.mdx"
+		label := labelContaining(t, path, "(other edition)")
+		if !strings.Contains(label, "_HD.w3mod") {
+			t.Errorf("%s: label %q does not reference _HD.w3mod", path, label)
+		}
+	})
+
+	t.Run("by file name", func(t *testing.T) {
+		const path = "War3.w3mod:_DE.w3mod:Units/Creeps/DarkHound/DarkHound.mdx"
+		label := labelContaining(t, path, "(by file name)")
+		if !strings.Contains(label, "_DE.w3mod:Textures/") {
+			t.Errorf("%s: label %q does not reference _DE.w3mod:Textures/", path, label)
+		}
+	})
+
+	t.Run("missing from the archive", func(t *testing.T) {
+		const path = "War3.w3mod:_DE.w3mod:Units/Undead/Putress/putress.mdx"
+		labelContaining(t, path, "missing from the archive")
+	})
+}
+
 func TestErrors(t *testing.T) {
 	cases := []struct {
 		name string
