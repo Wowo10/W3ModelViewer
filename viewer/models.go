@@ -168,6 +168,7 @@ func pickLOD(lods []mdx.LODTotal, want uint32) int {
 // insensitive), sorted by Path, and the editions present among them.
 func newModelPicker(storage *casc.Storage, r root.Root) *modelPicker {
 	p := &modelPicker{storage: storage, root: r, resolver: texture.NewResolver(r), selected: -1, loaded: -1, counts: map[[16]byte]modelCounts{}, play: newPlayback()}
+	p.model.lod = -1
 
 	seen := map[root.Edition]bool{}
 	for _, entry := range r.Entries {
