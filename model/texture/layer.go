@@ -50,8 +50,9 @@ func (res *Resolver) GeosetLayers(model root.Entry, materials []mdx.Material, te
 // layer seen in wardata): a resolved stored path, team colour/glow
 // (replaceable 1/2; drawn grey until the team colour/glow textures are
 // bound), or grey with the reason it can't be drawn: no texture, another
-// replaceable id, an unresolved stored path, or a coord id outside the
-// geoset's UV sets.
+// replaceable id, a coord id outside the geoset's UV sets, or a stored path
+// that's missing from the archive or ambiguous after every Resolve fallback
+// (see roadmap/04-tex/TEX-05-texture-fallbacks.md).
 func (res *Resolver) geosetLayer(model root.Entry, textures []mdx.Texture, g mdx.Geoset, layer mdx.Layer) Layer {
 	l := Layer{
 		Filter:  layer.FilterMode,
@@ -90,14 +91,14 @@ func (res *Resolver) geosetLayer(model root.Entry, textures []mdx.Texture, g mdx
 		l.Source = TeamGlow
 		l.Label = fmt.Sprintf("%s: team glow", layer.FilterMode)
 	default:
-		resolved, ok := res.Resolve(model, t)
-		if !ok {
-			l.Label = fmt.Sprintf("%s: grey: unresolved %s", layer.FilterMode, t.Path)
+		resolution := res.Resolve(model, t)
+		if !resolution.OK() {
+			l.Label = fmt.Sprintf("%s: grey: %s", layer.FilterMode, unresolvedReason(t.Path, resolution))
 			return l
 		}
 		l.Source = Texture
-		l.Entry = resolved
-		l.Label = fmt.Sprintf("%s: %s", layer.FilterMode, resolved.Path)
+		l.Entry = resolution.Entry
+		l.Label = fmt.Sprintf("%s: %s%s", layer.FilterMode, resolution.Entry.Path, HowSuffix(resolution.How))
 
 		if mask, ok := res.findTeamColorMask(model, textures, layer); ok {
 			l.Mask = mask
@@ -138,5 +139,21 @@ func (res *Resolver) findTeamColorMask(model root.Entry, textures []mdx.Texture,
 	if orm.Path == "" {
 		return root.Entry{}, false
 	}
-	return res.Resolve(model, orm)
+	resolution := res.Resolve(model, orm)
+	return resolution.Entry, resolution.OK()
+}
+
+// unresolvedReason describes why refPath didn't resolve: missing from the
+// archive entirely, ambiguous among several same-named .dds, or plain
+// unresolved (a replaceable id, or own/other-edition chains don't have it
+// and no .dds shares its base name under this model's conditions).
+func unresolvedReason(refPath string, r Resolution) string {
+	switch r.How {
+	case Missing:
+		return fmt.Sprintf("%s missing from the archive", refPath)
+	case Ambiguous:
+		return fmt.Sprintf("unresolved %s (%d .dds named %s)", refPath, r.Candidates, r.Base)
+	default:
+		return fmt.Sprintf("unresolved %s", refPath)
+	}
 }
