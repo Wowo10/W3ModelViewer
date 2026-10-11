@@ -103,7 +103,7 @@ type Server struct {
 	ddsSet map[[16]byte]bool // content keys of root entries whose Name ends in .dds
 	team   []teamTextureRefs // team[i] is player i, 0-24
 
-	readMu sync.Mutex // serializes storage.ReadByCKey, which races on concurrent reads
+	readMu sync.Mutex // guards reads, bumped alongside storage.ReadByCKey
 	reads  int64      // bumped under readMu, for tests and the requests/s notes
 
 	cache      *modelCache

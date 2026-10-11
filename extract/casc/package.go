@@ -9,6 +9,8 @@ import (
 )
 
 // Storage reads files from the local archives by encoding or content key.
+// After Open and LoadEncoding, ReadByCKey, LookupCKey and LookupEKey are safe
+// for concurrent use.
 type Storage struct {
 	index    idxPackages.Index
 	archives idxPackages.Archives
@@ -16,13 +18,17 @@ type Storage struct {
 	verify   bool
 }
 
-// Open reads the local idx files. With verify set, idx entries are checked
-// against their archive headers and every file read is checked against its MD5.
+// Open reads the local idx files and opens every archive they reference, so
+// the archive map is never written again. With verify set, idx entries are
+// checked against their archive headers and every file read is checked
+// against its MD5.
 func Open(verify bool) *Storage {
 	archives := make(idxPackages.Archives)
+	index := idxPackages.ReadIdxPackages(archives, verify)
+	archives.OpenAll(index)
 
 	return &Storage{
-		index:    idxPackages.ReadIdxPackages(archives, verify),
+		index:    index,
 		archives: archives,
 		verify:   verify,
 	}

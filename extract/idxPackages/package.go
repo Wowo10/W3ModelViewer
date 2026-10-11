@@ -165,6 +165,14 @@ func (a Archives) get(archive uint32) *os.File {
 	return f
 }
 
+// OpenAll opens the archive of every index entry, so Archives.get never
+// writes its map afterwards and is then safe to read from several goroutines.
+func (a Archives) OpenAll(index Index) {
+	for _, entry := range index {
+		a.get(entry.Archive)
+	}
+}
+
 func (a Archives) Close() {
 	for _, f := range a {
 		f.Close()
