@@ -86,6 +86,28 @@ func TestLoadIgnoresBadFiles(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsUnstoredKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog-abc.json")
+
+	c := &Catalog{
+		infos:    map[[16]byte]Info{ckey(1): {Geosets: 3}},
+		unstored: map[[16]byte]bool{ckey(2): true},
+	}
+	c.save(path, "abc")
+
+	got, ok := load(path, "abc", [][16]byte{ckey(1), ckey(2)})
+	if !ok {
+		t.Fatal("load: ok = false, want true (key 2 is recorded as unstored)")
+	}
+	if got[ckey(1)] != c.infos[ckey(1)] {
+		t.Errorf("load()[1] = %v, want %v", got[ckey(1)], c.infos[ckey(1)])
+	}
+	if _, ok := got[ckey(2)]; ok {
+		t.Error("load()[2] present, want absent: an unstored key stays unknown to Lookup")
+	}
+}
+
 // TestScanWardata runs a real scan over a handful of .mdx entries, including
 // a known no-geometry model, then checks a second Start on the same cache
 // directory reports FromCache. It is skipped when wardata isn't present.

@@ -24,8 +24,9 @@ const cacheFormat = 1
 // Catalog holds a background scan's result (Info per content key) and its
 // progress, safe for concurrent use.
 type Catalog struct {
-	mu    sync.RWMutex
-	infos map[[16]byte]Info
+	mu       sync.RWMutex
+	infos    map[[16]byte]Info
+	unstored map[[16]byte]bool // content keys found not to be stored locally
 
 	done, total int64 // atomic
 	finished    int32 // atomic bool
@@ -35,11 +36,15 @@ type Catalog struct {
 }
 
 // cacheFile is the on-disk cache, JSON-encoded: content keys as 32 lower-
-// case hex chars.
+// case hex chars. Unstored lists keys that were found not to be stored
+// locally at scan time (so they have no entry in Models, by design), letting
+// load tell "not scanned" apart from "known not to be stored" when checking
+// it has every wanted key.
 type cacheFile struct {
-	Format int             `json:"format"`
-	Build  string          `json:"build"`
-	Models map[string]Info `json:"models"`
+	Format   int             `json:"format"`
+	Build    string          `json:"build"`
+	Models   map[string]Info `json:"models"`
+	Unstored []string        `json:"unstored,omitempty"`
 }
 
 // CacheDir is where Start's cache file lives: os.UserCacheDir()/modelViewer.
@@ -66,7 +71,10 @@ func CacheDir() string {
 func Start(storage *casc.Storage, r root.Root, buildKey, dir string) *Catalog {
 	keys := distinctMDXKeys(r)
 
-	c := &Catalog{infos: make(map[[16]byte]Info, len(keys))}
+	c := &Catalog{
+		infos:    make(map[[16]byte]Info, len(keys)),
+		unstored: make(map[[16]byte]bool),
+	}
 	atomic.StoreInt64(&c.total, int64(len(keys)))
 
 	go c.run(storage, keys, buildKey, dir)
@@ -177,13 +185,16 @@ func (c *Catalog) scan(storage *casc.Storage, keys [][16]byte) {
 }
 
 // scanOne inspects one content key, if it is stored locally, and records
-// its Info. A content key not stored locally is skipped and stays unknown
-// to Lookup, so the scan never panics on a model the list could show but
-// not open.
+// its Info. A content key not stored locally is recorded as unstored
+// (for the cache) and stays unknown to Lookup, so the scan never panics on a
+// model the list could show but not open.
 func (c *Catalog) scanOne(storage *casc.Storage, ckey [16]byte) {
 	defer atomic.AddInt64(&c.done, 1)
 
 	if !stored(storage, ckey) {
+		c.mu.Lock()
+		c.unstored[ckey] = true
+		c.mu.Unlock()
 		return
 	}
 
@@ -207,8 +218,10 @@ func stored(storage *casc.Storage, ckey [16]byte) bool {
 }
 
 // load reads path, returning its models (decoded to [16]byte keys) and true
-// only when the file parses as JSON, its format and build match, and it has
-// an entry for every key in want. Any other case, including a missing or
+// only when the file parses as JSON, its format and build match, and every
+// key in want is either in Models or listed in Unstored (so a key that was
+// found not to be stored locally at scan time, and so was never recorded in
+// Models, doesn't force a rescan). Any other case, including a missing or
 // corrupt file, reports false and leaves the caller to scan.
 func load(path, buildKey string, want [][16]byte) (map[[16]byte]Info, bool) {
 	data, err := os.ReadFile(path)
@@ -224,13 +237,21 @@ func load(path, buildKey string, want [][16]byte) (map[[16]byte]Info, bool) {
 		return nil, false
 	}
 
+	unstored := make(map[string]bool, len(cf.Unstored))
+	for _, h := range cf.Unstored {
+		unstored[h] = true
+	}
+
 	infos := make(map[[16]byte]Info, len(want))
 	for _, ckey := range want {
-		info, ok := cf.Models[hex.EncodeToString(ckey[:])]
-		if !ok {
+		hexKey := hex.EncodeToString(ckey[:])
+		if info, ok := cf.Models[hexKey]; ok {
+			infos[ckey] = info
+			continue
+		}
+		if !unstored[hexKey] {
 			return nil, false
 		}
-		infos[ckey] = info
 	}
 	return infos, true
 }
@@ -246,9 +267,13 @@ func (c *Catalog) save(path, buildKey string) {
 	for ckey, info := range c.infos {
 		models[hex.EncodeToString(ckey[:])] = info
 	}
+	unstored := make([]string, 0, len(c.unstored))
+	for ckey := range c.unstored {
+		unstored = append(unstored, hex.EncodeToString(ckey[:]))
+	}
 	c.mu.RUnlock()
 
-	data, err := json.Marshal(cacheFile{Format: cacheFormat, Build: buildKey, Models: models})
+	data, err := json.Marshal(cacheFile{Format: cacheFormat, Build: buildKey, Models: models, Unstored: unstored})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "catalog: marshal cache:", err)
 		return
