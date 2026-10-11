@@ -78,11 +78,13 @@ func (fb *folderBrowser) draw(s *setupState) {
 
 		if fb.readErr != nil {
 			imgui.TextColored(imgui.Vec4{X: 1, Y: 0.4, Z: 0.4, W: 1}, fb.readErr.Error())
-		} else if imgui.BeginChildStrV("##dirs", imgui.Vec2{X: 0, Y: -imgui.CurrentStyle().FramePadding().Y*2 - imgui.CalcTextSize("x").Y*3}, imgui.ChildFlagsBorders, 0) {
-			for _, name := range fb.entries {
-				imgui.SelectableBool(name)
-				if imgui.IsItemClicked() {
-					fb.setDir(filepath.Join(fb.dir, name))
+		} else {
+			if imgui.BeginChildStrV("##dirs", imgui.Vec2{X: 0, Y: -imgui.CurrentStyle().FramePadding().Y*2 - imgui.CalcTextSize("x").Y*3}, imgui.ChildFlagsBorders, 0) {
+				for _, name := range fb.entries {
+					imgui.SelectableBool(name)
+					if imgui.IsItemClicked() {
+						fb.setDir(filepath.Join(fb.dir, name))
+					}
 				}
 			}
 			imgui.EndChild()

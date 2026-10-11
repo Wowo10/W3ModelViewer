@@ -189,7 +189,7 @@ func drawLoading(dir string, elapsed time.Duration) {
 
 	flags := imgui.WindowFlagsNoResize | imgui.WindowFlagsNoMove | imgui.WindowFlagsNoCollapse | imgui.WindowFlagsAlwaysAutoResize
 	if imgui.BeginV("Loading", nil, flags) {
-		imgui.Text(fmt.Sprintf("Loading %s… (%.0fs)", dir, elapsed.Seconds()))
+		imgui.Text(fmt.Sprintf("Loading %s... (%.0fs)", dir, elapsed.Seconds()))
 	}
 	imgui.End()
 }
