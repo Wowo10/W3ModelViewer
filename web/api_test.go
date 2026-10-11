@@ -544,6 +544,10 @@ func TestErrors(t *testing.T) {
 		{"seq -2", "/api/pose?path=" + url.QueryEscape(classicFootman) + "&seq=-2&frame=0&global=0", 400},
 		{"seq too large", "/api/pose?path=" + url.QueryEscape(classicFootman) + "&seq=999&frame=0&global=0", 400},
 		{"negative frame", "/api/pose?path=" + url.QueryEscape(classicFootman) + "&seq=0&frame=-1&global=0", 400},
+		{"lod not in model", "/api/mesh?path=" + url.QueryEscape(reforgedFootman) + "&lod=4", 400},
+		{"lod not a number", "/api/mesh?path=" + url.QueryEscape(reforgedFootman) + "&lod=x", 400},
+		{"negative lod", "/api/mesh?path=" + url.QueryEscape(reforgedFootman) + "&lod=-1", 400},
+		{"lod 1 on single-LOD model", "/api/mesh?path=" + url.QueryEscape(classicFootman) + "&lod=1", 400},
 		{"short ckey", "/api/texture?ckey=zz", 400},
 	}
 	for _, c := range cases {
@@ -625,6 +629,80 @@ func TestCheckAddr(t *testing.T) {
 				}
 			}()
 			CheckAddr(addr)
+		})
+	}
+}
+
+func TestLODs(t *testing.T) {
+	wantReforged := []struct{ vertices, triangles int }{
+		{13400, 19015}, {11566, 15686}, {9051, 11492}, {6125, 7018},
+	}
+
+	for _, c := range footmanCases {
+		t.Run(c.name, func(t *testing.T) {
+			var m modelResponse
+			if err := json.Unmarshal(getBody(t, "/api/model?path="+url.QueryEscape(c.path)), &m); err != nil {
+				t.Fatal(err)
+			}
+
+			want := wantReforged
+			if c.name != "reforged" {
+				want = []struct{ vertices, triangles int }{{c.vertices, c.triangles}}
+			}
+			if len(m.LODs) != len(want) {
+				t.Fatalf("lods: got %d, want %d", len(m.LODs), len(want))
+			}
+
+			for k, l := range m.LODs {
+				if l.LOD != uint32(k) || l.Vertices != want[k].vertices || l.Triangles != want[k].triangles {
+					t.Errorf("lod %d: got lod %d %d/%d, want %d/%d", k, l.LOD, l.Vertices, l.Triangles, want[k].vertices, want[k].triangles)
+				}
+				if len(l.Offsets) != len(m.Geosets) {
+					t.Fatalf("lod %d: %d offsets for %d geosets", k, len(l.Offsets), len(m.Geosets))
+				}
+
+				buf := getBody(t, l.Mesh.URL)
+				if len(buf) != l.Mesh.Size {
+					t.Errorf("lod %d mesh: got %d bytes, size says %d", k, len(buf), l.Mesh.Size)
+				}
+
+				count, vertices, triangles := 0, 0, 0
+				for i, g := range m.Geosets {
+					off := l.Offsets[i]
+					if (off != nil) != (g.LOD == l.LOD) {
+						t.Errorf("lod %d geoset %d (lod %d): offsets null = %v", k, i, g.LOD, off == nil)
+					}
+					if off == nil {
+						continue
+					}
+					count++
+					vertices += g.Vertices
+					triangles += g.Triangles
+					checkOffset(t, i, "positions", off.Positions, 12*g.Vertices, len(buf))
+					checkOffset(t, i, "weights", off.Weights, 32*g.Vertices, len(buf))
+					checkOffset(t, i, "nodes", off.Nodes, 32*g.Vertices, len(buf))
+					checkOffset(t, i, "indices", off.Indices, 6*g.Triangles, len(buf))
+				}
+				if count != l.Geosets || vertices != l.Vertices || triangles != l.Triangles {
+					t.Errorf("lod %d: offsets cover %d geosets %d/%d, lods says %d %d/%d", k, count, vertices, triangles, l.Geosets, l.Vertices, l.Triangles)
+				}
+			}
+
+			// No lod parameter is the lowest LOD, as before.
+			plain := getBody(t, "/api/mesh?path="+url.QueryEscape(c.path))
+			if !bytes.Equal(plain, getBody(t, m.LODs[0].Mesh.URL)) {
+				t.Error("/api/mesh without lod differs from lods[0]")
+			}
+			if len(plain) != c.meshSize || m.Mesh.Size != c.meshSize {
+				t.Errorf("default mesh: got %d bytes (model says %d), want %d", len(plain), m.Mesh.Size, c.meshSize)
+			}
+			for i, g := range m.Geosets {
+				a, _ := json.Marshal(g.Mesh)
+				b, _ := json.Marshal(m.LODs[0].Offsets[i])
+				if !bytes.Equal(a, b) {
+					t.Errorf("geoset %d mesh differs from lods[0].offsets", i)
+				}
+			}
 		})
 	}
 }
