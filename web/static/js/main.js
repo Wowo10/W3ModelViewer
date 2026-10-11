@@ -205,15 +205,15 @@ async function main() {
 
 	/**
 	 * wantPose asks the scheduler for model's pose at (seqIndex, frame,
-	 * play.global): global is 0 when seqIndex is -1 (bind pose, ignored by
-	 * the server either way).
+	 * global): global is 0 when seqIndex is -1 (bind pose, ignored by the
+	 * server either way).
 	 * @param {Model} model
 	 * @param {number} seqIndex
 	 * @param {number} frame
+	 * @param {number} global
 	 */
-	function wantPose(model, seqIndex, frame) {
-		const global = seqIndex === -1 ? 0 : Math.floor(play.global) >>> 0;
-		poseScheduler.want({ token: loadToken, model, seq: seqIndex, frame: Math.floor(frame), global });
+	function wantPose(model, seqIndex, frame, global) {
+		poseScheduler.want({ token: loadToken, model, seq: seqIndex, frame: Math.floor(frame), global: seqIndex === -1 ? 0 : global });
 	}
 
 	/**
@@ -317,6 +317,14 @@ async function main() {
 				pose = decodePose(buffer, req.model);
 			} catch (err) {
 				console.error("main: decodePose:", err);
+				if (pending && pending.model === req.model) {
+					for (const t of pending.textures.values()) {
+						gl.deleteTexture(t.texture);
+					}
+					pending = null;
+					panelEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+					animPanelEl.textContent = "";
+				}
 				return;
 			}
 
@@ -519,14 +527,21 @@ async function main() {
 			// the scheduler sends whichever request is "wanted" once it
 			// settles, so this must stay "wanted" until it is sent and swapped
 			// in - a one-shot want() here could get overwritten and lost.
-			wantPose(pending.model, pending.seqIndex, pending.frame);
+			wantPose(pending.model, pending.seqIndex, pending.frame, poseFrame(play).global);
 		} else if (currentModel && currentSeqIndex !== -1) {
 			if (lastTime !== null) {
+				const wasPlaying = play.playing;
 				const { start, end } = sequenceRange(currentModel.sequences[currentSeqIndex]);
 				advance(play, (now - lastTime) / 1000, start, end);
+				if (play.playing !== wasPlaying) {
+					// advance() stops playback when a non-looping sequence
+					// reaches its end; rebuild so the play/pause button's
+					// label reflects it instead of lagging a click behind.
+					rebuildAnimPanel();
+				}
 			}
 			const pf = poseFrame(play);
-			wantPose(currentModel, currentSeqIndex, pf.frame);
+			wantPose(currentModel, currentSeqIndex, pf.frame, pf.global);
 			animPanelUpdate(pf.frame);
 		}
 		lastTime = now;

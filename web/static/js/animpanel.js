@@ -116,6 +116,8 @@ export function renderAnimPanel(container, model, seqIndex, play, callbacks) {
 	frameValue.textContent = String(initialFrame);
 	frameInput.addEventListener("pointerdown", () => callbacks.onScrubStart());
 	frameInput.addEventListener("pointerup", () => callbacks.onScrubEnd());
+	frameInput.addEventListener("pointercancel", () => callbacks.onScrubEnd());
+	frameInput.addEventListener("change", () => callbacks.onScrubEnd());
 	frameInput.addEventListener("input", () => {
 		const v = Number(frameInput.value);
 		frameValue.textContent = String(v);
