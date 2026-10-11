@@ -70,8 +70,8 @@ imports this module, see the recipe in the `/plan` skill).
    range. If a panic stops the run early, time throwaway copies in the
    scratchpad with that panic disabled — never edit the real code for this.
 5. The viewer (`make run`, or the binary with no output flag) needs a display and
-   someone to close it; don't start it, say it was only compile-checked and leave
-   `[owner]` criteria to the owner. Never run the program without an output flag (`-list`, `-variants`, `-extract`, `-mdxinfo`, `-survey`): with none it opens the desktop viewer, which blocks until someone closes its window. Old "default run unchanged" checks no longer apply; compare output flags instead. `-web` serves until killed, so run it in the background with a timeout.
+   someone to look at it; at most smoke-test it, say what was checked and leave
+   `[owner]` criteria to the owner. Without an output flag (`-list`, `-variants`, `-extract`, `-mdxinfo`, `-survey`) the program opens the desktop viewer, which never exits by itself: start it only under a time limit (e.g. `timeout 15 ./modelViewer`, as a smoke test that it opens without panicking), never bare. Old "default run unchanged" checks no longer apply; compare output flags instead. `-web` also serves until killed: run it with `timeout` or in the background and stop it.
 
 ## Report
 

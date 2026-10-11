@@ -28,7 +28,7 @@ Run everything from the repo root; put binaries and output in the session
 scratchpad.
 
 1. **Gate:** `gofmt -l .` is empty, `go vet ./...` and `go build ./...` pass.
-   Never run the program without an output flag (`-list`, `-variants`, `-extract`, `-mdxinfo`, `-survey`): with none it opens the desktop viewer, which blocks until someone closes its window. Old "default run unchanged" checks no longer apply; compare output flags instead. `-web` serves until killed, so run it in the background with a timeout.
+   Without an output flag (`-list`, `-variants`, `-extract`, `-mdxinfo`, `-survey`) the program opens the desktop viewer, which never exits by itself: start it only under a time limit (e.g. `timeout 15 ./modelViewer`, as a smoke test that it opens without panicking), never bare. Old "default run unchanged" checks no longer apply; compare output flags instead. `-web` also serves until killed: run it with `timeout` or in the background and stop it.
    When `web/` changes (or once `web/package.json` exists), `npm --prefix web
    ci` if `web/node_modules` is missing, then `npm --prefix web run check`
    passes.
