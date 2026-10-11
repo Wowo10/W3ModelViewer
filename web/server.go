@@ -7,16 +7,29 @@
 // little-endian, every section 4-byte aligned so the page can view them
 // with typed arrays.
 //
-//   - GET /api/models -> {"models": [{"path","name","edition","overlays"}...],
-//     "team": [{"color": TextureRef, "glow": TextureRef}...]}; models sorted
+//   - GET /api/models -> {"models": [{"path","name","edition","overlays",
+//     "geosets"}...],"team": [{"color": TextureRef, "glow": TextureRef}...],
+//     "scan": {"done","total","finished"}}; models sorted
 //     by path like the desktop picker (every root entry whose Name ends in
-//     ".mdx", case-insensitively); team[i] is player i, 0-24.
+//     ".mdx", case-insensitively); team[i] is player i, 0-24. geosets is the
+//     model's geoset count from the background model/catalog scan (started
+//     with the server, or loaded from the shared cache file), null until the
+//     scan reaches it; scan is that scan's progress over distinct content
+//     keys.
+//
+//   - GET /api/scan -> {"done","total","finished","geosets":[n|null...]};
+//     geosets is parallel to /api/models' models (same order and length),
+//     for the page to poll while the scan runs.
 //
 //   - GET /api/model?path= -> {"path","name","edition","overlays","ckey",
 //     "version","chunks","objects","lod","vertices","triangles",
 //     "geosets":[Geoset...],"sequences":[{"name","key","start","end"}...],
 //     "defaultSequence","globalSequences":[...],"editions":[{"path",
-//     "edition","overlays"}...],"mesh":{"url","size"},"lods":[LOD...]}.
+//     "edition","overlays"}...],"mesh":{"url","size"},"lods":[LOD...],
+//     "contents":{"geosets","lods","emitters","popcornFX","ribbons","lights",
+//     "attachments","cameras","bones","helpers","explain"}}.
+//     contents is catalog.Inspect of this model, known whether or not the
+//     scan has reached it; explain is Info.Explain(), "" with geosets.
 //     objects = len(Pivots()), the pose's matrix count; lod = the lowest
 //     LOD (the one in the mesh); vertices/triangles = totals over every
 //     geoset. Geoset: {"material","lod","vertices","triangles","priority",
@@ -86,6 +99,7 @@ import (
 
 	"modelView/extract/casc"
 	"modelView/extract/root"
+	"modelView/model/catalog"
 	"modelView/model/texture"
 )
 
@@ -103,6 +117,7 @@ type Server struct {
 	storage  *casc.Storage
 	root     root.Root
 	resolver *texture.Resolver
+	catalog  *catalog.Catalog
 
 	models []root.Entry      // every .mdx root entry, sorted by path
 	byPath map[string]int    // models[byPath[path]].Path == path
@@ -126,13 +141,16 @@ type teamTextureRefs struct {
 // entry sorted by path, the set of .dds content keys, and the 25 standard
 // players' team colour/glow texture references (War3.w3mod's
 // ReplaceableTextures/TeamColor|TeamGlow/<name>NN.dds, players 00-24).
+// cat is the background scan of the models' contents (catalog.Start); the
+// list reports its results as they arrive.
 // New panics (like the desktop viewer's loadTeamTexture) if any of those 50
 // team textures is missing from the root.
-func New(storage *casc.Storage, r root.Root) *Server {
+func New(storage *casc.Storage, r root.Root, cat *catalog.Catalog) *Server {
 	s := &Server{
 		storage:    storage,
 		root:       r,
 		resolver:   texture.NewResolver(r),
+		catalog:    cat,
 		ddsSet:     map[[16]byte]bool{},
 		cache:      newModelCache(),
 		CacheBound: defaultCacheBound,
@@ -207,6 +225,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux := http.NewServeMux()
 	registerAPI(mux, "/api/models", s.handleModels)
+	registerAPI(mux, "/api/scan", s.handleScan)
 	registerAPI(mux, "/api/model", s.handleModel)
 	registerAPI(mux, "/api/mesh", s.handleMesh)
 	registerAPI(mux, "/api/texture", s.handleTexture)

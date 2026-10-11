@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"modelView/extract/buildConfig"
 	"modelView/extract/buildinfo"
 	"modelView/extract/casc"
 	"modelView/extract/root"
+	"modelView/model/catalog"
 )
 
 // Footman's three editions, as listed in the task's roadmap notes.
@@ -25,6 +28,8 @@ const (
 var (
 	ts  *httptest.Server
 	srv *Server
+
+	testCatalog *catalog.Catalog
 )
 
 // TestMain chdirs to the repo root (go test runs in the package dir) and
@@ -45,7 +50,8 @@ func TestMain(m *testing.M) {
 	storage, r := openTestStorage()
 	defer storage.Close()
 
-	srv = New(storage, r)
+	testCatalog = catalog.Start(storage, scanRoot(r), "test-build", "")
+	srv = New(storage, r, testCatalog)
 	ts = httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -131,4 +137,33 @@ func getFrom(t *testing.T, ts *httptest.Server, path string) []byte {
 		t.Fatal(err)
 	}
 	return body
+}
+
+// scanRoot returns a root.Root over r's .mdx entries under "SharedFX/" (a
+// few hundred) plus the three Footman editions, so the test catalog scans
+// in about a second instead of the full archive's ~16 s.
+func scanRoot(r root.Root) root.Root {
+	want := map[string]bool{classicFootman: true, reforgedFootman: true, definitiveFootman: true}
+	out := root.Root{}
+	for _, e := range r.Entries {
+		if want[e.Path] || strings.Contains(e.Path, ":SharedFX/") {
+			out.Entries = append(out.Entries, e)
+		}
+	}
+	return out
+}
+
+// waitScan blocks until the test catalog's scan has finished.
+func waitScan(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		if _, _, finished := testCatalog.Progress(); finished {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("catalog scan did not finish in time")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

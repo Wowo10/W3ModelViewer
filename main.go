@@ -67,7 +67,7 @@ func main() {
 	encoding.DEBUG = *debug
 
 	if output {
-		storage, r, _ := openArchive("wardata", *verify)
+		storage, r, buildKey := openArchive("wardata", *verify)
 		defer storage.Close()
 
 		if *extract != "" {
@@ -91,7 +91,7 @@ func main() {
 		}
 
 		if *webFlag {
-			web.New(storage, r).Serve(*addr)
+			web.New(storage, r, catalog.Start(storage, r, buildKey, catalog.CacheDir())).Serve(*addr)
 		}
 	}
 

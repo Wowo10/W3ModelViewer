@@ -28,12 +28,43 @@ type modelListEntry struct {
 	Name     string   `json:"name"`
 	Edition  string   `json:"edition"`
 	Overlays []string `json:"overlays"`
+	Geosets  *int     `json:"geosets"` // null until the scan reaches the model
+}
+
+// scanProgress is the catalog scan's progress.
+type scanProgress struct {
+	Done     int  `json:"done"`
+	Total    int  `json:"total"`
+	Finished bool `json:"finished"`
 }
 
 // modelListResponse is /api/models' body.
 type modelListResponse struct {
 	Models []modelListEntry  `json:"models"`
 	Team   []teamTextureRefs `json:"team"`
+	Scan   scanProgress      `json:"scan"`
+}
+
+// scanResponse is /api/scan's body.
+type scanResponse struct {
+	scanProgress
+	Geosets []*int `json:"geosets"`
+}
+
+// contentsRef is a modelResponse's "contents" field: catalog.Info and its
+// explanation.
+type contentsRef struct {
+	Geosets     int    `json:"geosets"`
+	LODs        int    `json:"lods"`
+	Emitters    int    `json:"emitters"`
+	PopcornFX   int    `json:"popcornFX"`
+	Ribbons     int    `json:"ribbons"`
+	Lights      int    `json:"lights"`
+	Attachments int    `json:"attachments"`
+	Cameras     int    `json:"cameras"`
+	Bones       int    `json:"bones"`
+	Helpers     int    `json:"helpers"`
+	Explain     string `json:"explain"`
 }
 
 // editionRef is one entry of a modelResponse's "editions" array.
@@ -162,6 +193,7 @@ type modelResponse struct {
 	Editions        []editionRef  `json:"editions"`
 	Mesh            meshRef       `json:"mesh"`
 	LODs            []lodRef      `json:"lods"`
+	Contents        contentsRef   `json:"contents"`
 }
 
 // overlaysOrEmpty returns entry.Variant.Overlays, or an empty (never nil)

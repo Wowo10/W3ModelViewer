@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"modelView/model/catalog"
 	"modelView/model/mdx"
 )
 
@@ -409,7 +410,7 @@ func TestCache(t *testing.T) {
 // with a 1-byte cache bound, since the shared srv's cache is already
 // warm with every Footman by the time this test runs.
 func TestCacheEviction(t *testing.T) {
-	s := New(srv.storage, srv.root)
+	s := New(srv.storage, srv.root, srv.catalog)
 	s.CacheBound = 1
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -467,7 +468,7 @@ func TestLayersPerEdition(t *testing.T) {
 	}
 
 	t.Run("HD then DE", func(t *testing.T) {
-		s := New(srv.storage, srv.root)
+		s := New(srv.storage, srv.root, srv.catalog)
 		ts := httptest.NewServer(s.Handler())
 		defer ts.Close()
 		checkChain(t, ts, hd, "_HD.w3mod", "_DE.w3mod")
@@ -475,7 +476,7 @@ func TestLayersPerEdition(t *testing.T) {
 	})
 
 	t.Run("DE then HD", func(t *testing.T) {
-		s := New(srv.storage, srv.root)
+		s := New(srv.storage, srv.root, srv.catalog)
 		ts := httptest.NewServer(s.Handler())
 		defer ts.Close()
 		checkChain(t, ts, de, "_DE.w3mod", "_HD.w3mod")
@@ -704,5 +705,134 @@ func TestLODs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+const (
+	smokeBlackLarge = "War3.w3mod:_DE.w3mod:SharedFX/Building_Smoke_large/SmokeBlackLarge.mdx"
+	classicPeasant  = "War3.w3mod:Units/Human/Peasant/Peasant.mdx"
+)
+
+// listGeosets maps each listed path to its geoset count (nil = unknown).
+func listGeosets(list modelListResponse) map[string]*int {
+	out := map[string]*int{}
+	for _, m := range list.Models {
+		out[m.Path] = m.Geosets
+	}
+	return out
+}
+
+func TestModelsGeosets(t *testing.T) {
+	waitScan(t)
+
+	var list modelListResponse
+	if err := json.Unmarshal(getBody(t, "/api/models"), &list); err != nil {
+		t.Fatal(err)
+	}
+	got := listGeosets(list)
+
+	for path, want := range map[string]int{smokeBlackLarge: 0, classicFootman: 5, reforgedFootman: 36, definitiveFootman: 8} {
+		if got[path] == nil || *got[path] != want {
+			t.Errorf("%s: geosets = %v, want %d", path, got[path], want)
+		}
+	}
+	if got[classicPeasant] != nil {
+		t.Errorf("%s: geosets = %d, want null (not scanned)", classicPeasant, *got[classicPeasant])
+	}
+
+	_, total, _ := testCatalog.Progress()
+	if !list.Scan.Finished || list.Scan.Done != total || list.Scan.Total != total || total == 0 {
+		t.Errorf("scan = %+v, want finished %d/%d", list.Scan, total, total)
+	}
+}
+
+func TestModelsUnknownWhileScanning(t *testing.T) {
+	s := New(srv.storage, srv.root, &catalog.Catalog{})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	var list modelListResponse
+	if err := json.Unmarshal(getFrom(t, ts, "/api/models"), &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range list.Models {
+		if m.Geosets != nil {
+			t.Fatalf("%s: geosets = %d, want null", m.Path, *m.Geosets)
+		}
+	}
+	if list.Scan != (scanProgress{}) {
+		t.Errorf("scan = %+v, want zero", list.Scan)
+	}
+	if !strings.Contains(string(getFrom(t, ts, "/api/models")), `"geosets":null`) {
+		t.Error("geosets should marshal as null")
+	}
+}
+
+func TestScan(t *testing.T) {
+	waitScan(t)
+
+	var list modelListResponse
+	if err := json.Unmarshal(getBody(t, "/api/models"), &list); err != nil {
+		t.Fatal(err)
+	}
+	var scan scanResponse
+	if err := json.Unmarshal(getBody(t, "/api/scan"), &scan); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(scan.Geosets) != len(list.Models) {
+		t.Fatalf("scan geosets: %d, want %d", len(scan.Geosets), len(list.Models))
+	}
+	if scan.scanProgress != list.Scan {
+		t.Errorf("scan progress %+v != list's %+v", scan.scanProgress, list.Scan)
+	}
+	for i, m := range list.Models {
+		a, b := scan.Geosets[i], m.Geosets
+		if (a == nil) != (b == nil) || (a != nil && *a != *b) {
+			t.Fatalf("%s: /api/scan %v != /api/models %v", m.Path, a, b)
+		}
+		if m.Path == smokeBlackLarge && (a == nil || *a != 0) {
+			t.Errorf("SmokeBlackLarge: scan geosets %v, want 0", a)
+		}
+		if m.Path == classicFootman && (a == nil || *a != 5) {
+			t.Errorf("Footman: scan geosets %v, want 5", a)
+		}
+	}
+
+	resp, err := http.Post(ts.URL+"/api/scan", "text/plain", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST /api/scan: status %d, want 405", resp.StatusCode)
+	}
+}
+
+func TestModelContents(t *testing.T) {
+	fetch := func(path string) modelResponse {
+		var m modelResponse
+		if err := json.Unmarshal(getBody(t, "/api/model?path="+url.QueryEscape(path)), &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	smoke := fetch(smokeBlackLarge).Contents
+	if smoke.Geosets != 0 || smoke.PopcornFX != 1 {
+		t.Errorf("SmokeBlackLarge contents = %+v, want 0 geosets, 1 PopcornFX", smoke)
+	}
+	if want := "No geometry: 1 PopcornFX emitter (CORN)"; smoke.Explain != want {
+		t.Errorf("SmokeBlackLarge explain = %q, want %q", smoke.Explain, want)
+	}
+
+	classic := fetch(classicFootman).Contents
+	if classic.Geosets != 5 || classic.LODs != 1 || classic.Explain != "" {
+		t.Errorf("classic Footman contents = %+v, want 5 geosets, 1 LOD, no explanation", classic)
+	}
+
+	reforged := fetch(reforgedFootman)
+	if reforged.Contents.LODs != len(reforged.LODs) {
+		t.Errorf("reforged Footman contents.lods = %d, want %d", reforged.Contents.LODs, len(reforged.LODs))
 	}
 }

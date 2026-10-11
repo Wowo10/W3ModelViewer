@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"modelView/extract/root"
+	"modelView/model/catalog"
 	"modelView/model/mdx"
 	"modelView/model/texture"
 )
@@ -30,6 +31,8 @@ type loaded struct {
 	sequences   []mdx.Sequence
 	geosetAnims []mdx.GeosetAnim
 	globals     []uint32
+
+	contents catalog.Info
 
 	lods   []mdx.LODTotal // ascending, parallel to meshes; nil without geosets
 	meshes []lodMesh
@@ -79,7 +82,7 @@ func (s *Server) load(idx int) *loaded {
 	m := mdx.Read(data)
 	geosets := m.Geosets()
 
-	l := &loaded{version: m.Version, chunks: len(m.Chunks), geosets: geosets}
+	l := &loaded{version: m.Version, chunks: len(m.Chunks), geosets: geosets, contents: catalog.Inspect(m)}
 
 	if len(geosets) > 0 {
 		l.materials = m.Materials()
@@ -251,6 +254,19 @@ func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
 		GlobalSequences: uint32sOrEmpty(m.globals),
 		Mesh:            meshRef{URL: meshURL(entry.Path, nil), Size: len(lowest.buf)},
 		LODs:            make([]lodRef, len(m.lods)),
+		Contents: contentsRef{
+			Geosets:     m.contents.Geosets,
+			LODs:        m.contents.LODs,
+			Emitters:    m.contents.Emitters,
+			PopcornFX:   m.contents.PopcornFX,
+			Ribbons:     m.contents.Ribbons,
+			Lights:      m.contents.Lights,
+			Attachments: m.contents.Attachments,
+			Cameras:     m.contents.Cameras,
+			Bones:       m.contents.Bones,
+			Helpers:     m.contents.Helpers,
+			Explain:     m.contents.Explain(),
+		},
 	}
 
 	for i, t := range m.lods {
