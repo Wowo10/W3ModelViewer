@@ -27,9 +27,14 @@ go run . -h         # every flag
 ```
 
 **Desktop viewer.** Pick a model in the directory tree (with a text filter
-and an edition select). The Model window shows its vertex and triangle counts
-per geoset, its material layers and buttons for the asset's other editions.
-The Animation window plays its sequences. Drag to rotate, scroll to zoom.
+and an edition select). Models with no geometry (particle effects and the
+like) are hidden by default; a "show models without geometry" checkbox
+brings them back, each with a short explanation of what it holds instead.
+A background scan builds this the first time (progress shown in the Models
+window) and caches it under `os.UserCacheDir()/modelViewer/` for the next
+start. The Model window shows its vertex and triangle counts per geoset, its
+material layers and buttons for the asset's other editions. The Animation
+window plays its sequences. Drag to rotate, scroll to zoom.
 
 **Web viewer.** The same viewer as a page: the tree, model panel and
 animation panel. Textures upload compressed when the browser supports S3TC
@@ -75,6 +80,7 @@ from.
 | `extract/` | CASC: build info, build config, `.idx`, BLTE, encoding, root, `casc.Storage` |
 | `model/mdx` | MDX parsing (geosets, materials, textures, sequences, bones, skinning) and pose evaluation |
 | `model/texture` | texture path resolution, DDS headers, drawable layers |
+| `model/catalog` | background scan for geometry/effect counts per model, cached on disk |
 | `viewer/` | desktop viewer (SDL2, OpenGL 3.2, Dear ImGui via cimgui-go) |
 | `web/` | web server and API; `web/static/` is the embedded page (JavaScript modules, WebGL2) |
 | `main.go` | flags and command-line output |
