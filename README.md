@@ -16,8 +16,8 @@ web viewer only listens on localhost.
 - A Warcraft III installation (the directory with `.build.info` and
   `Data/`). The desktop viewer asks for it on first start and saves it in
   `modelViewer.json` next to the binary (or the working directory, under
-  `go run`). Output flags, `-web` and the tests read a copy or symlink of
-  it at `wardata/` in the repository root.
+  `go run`), and `make web` serves that same install. Output flags and the
+  tests read a copy or symlink of it at `wardata/` in the repository root.
 - Node.js only to check the web page's JavaScript; running it needs only a
   browser with WebGL2.
 
@@ -25,7 +25,7 @@ web viewer only listens on localhost.
 
 ```sh
 make run                    # desktop viewer
-make run ARGS=-web          # web viewer on http://127.0.0.1:8080
+make web                    # web viewer on http://127.0.0.1:8001
 make run ARGS=-h            # every flag
 ```
 
@@ -52,8 +52,11 @@ and RGTC, otherwise they're decoded in JavaScript (`?cpu=1` forces that). Like
 the desktop viewer, the page hides models with no geometry (a "show models
 without geometry" checkbox brings them back, with an explanation when opened)
 and shows the scan's progress; the scan and its cache are shared with the
-desktop viewer. Use `-addr` to change the port; only loopback addresses are
-accepted.
+desktop viewer. `make web` serves the install saved in `modelViewer.json`
+and stops with a message if there is none (run `make run` and pick the
+folder first, or set `installPath` in that file). It listens on the file's
+`"port"` (8001 unless set); `-addr` overrides the whole address, and only
+loopback addresses are accepted.
 
 **Command-line output.** Instead of opening the viewer:
 
@@ -95,7 +98,7 @@ from.
 | `model/mdx` | MDX parsing (geosets, materials, textures, sequences, bones, skinning) and pose evaluation |
 | `model/texture` | texture path resolution, DDS headers, drawable layers |
 | `model/catalog` | background scan for geometry/effect counts per model, cached on disk |
-| `settings/` | `modelViewer.json` location, loading/saving and install folder validation |
+| `settings/` | `modelViewer.json` (install path, web port) location, loading/saving and install folder validation |
 | `viewer/` | desktop viewer (SDL2, OpenGL 3.2, Dear ImGui via cimgui-go) |
 | `web/` | web server and API; `web/static/` is the embedded page (JavaScript modules, WebGL2) |
 | `main.go` | flags and command-line output |
