@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 )
 
-var dataPath = "wardata/Data/data/"
-
 var filenames = []string{
 	"0a0000001c.idx",
 	"0b0000001b.idx",
@@ -30,6 +28,11 @@ var filenames = []string{
 }
 
 var DEBUG = false
+
+// Filenames returns the idx files ReadIdxPackages reads, in order.
+func Filenames() []string {
+	return append([]string(nil), filenames...)
+}
 
 const (
 	entriesSizeOffset = 0x20
@@ -58,11 +61,11 @@ func (i Index) Lookup(ekey []byte) (IndexEntry, bool) {
 
 // ReadIdxPackages reads all local idx files. With verify set, every entry is
 // cross-checked against the header stored in its archive.
-func ReadIdxPackages(archives Archives, verify bool) (m Index) {
+func ReadIdxPackages(dataDir string, archives Archives, verify bool) (m Index) {
 	m = make(Index)
 
 	for _, filename := range filenames {
-		path := filepath.Join(dataPath, filename)
+		path := filepath.Join(dataDir, filename)
 		entries := readIdxPackage(path, archives, verify)
 
 		if DEBUG {
@@ -150,18 +153,26 @@ func verifyEntry(key [9]byte, entry IndexEntry, archives Archives) bool {
 
 // Archives keeps data.### files open so each archive is opened only once.
 // The caller closes them with Close.
-type Archives map[uint32]*os.File
+type Archives struct {
+	dir   string
+	files map[uint32]*os.File
+}
+
+// NewArchives creates an Archives that opens data.### files under dataDir.
+func NewArchives(dataDir string) Archives {
+	return Archives{dir: dataDir, files: make(map[uint32]*os.File)}
+}
 
 func (a Archives) get(archive uint32) *os.File {
-	if f, ok := a[archive]; ok {
+	if f, ok := a.files[archive]; ok {
 		return f
 	}
 
-	f, err := os.Open(filepath.Join(dataPath, fmt.Sprintf("data.%03d", archive)))
+	f, err := os.Open(filepath.Join(a.dir, fmt.Sprintf("data.%03d", archive)))
 	if err != nil {
 		panic(err)
 	}
-	a[archive] = f
+	a.files[archive] = f
 	return f
 }
 
@@ -174,7 +185,7 @@ func (a Archives) OpenAll(index Index) {
 }
 
 func (a Archives) Close() {
-	for _, f := range a {
+	for _, f := range a.files {
 		f.Close()
 	}
 }

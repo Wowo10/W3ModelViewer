@@ -6,6 +6,7 @@ import (
 	"modelView/extract/blte"
 	"modelView/extract/encoding"
 	"modelView/extract/idxPackages"
+	"path/filepath"
 )
 
 // Storage reads files from the local archives by encoding or content key.
@@ -18,13 +19,14 @@ type Storage struct {
 	verify   bool
 }
 
-// Open reads the local idx files and opens every archive they reference, so
-// the archive map is never written again. With verify set, idx entries are
-// checked against their archive headers and every file read is checked
-// against its MD5.
-func Open(verify bool) *Storage {
-	archives := make(idxPackages.Archives)
-	index := idxPackages.ReadIdxPackages(archives, verify)
+// Open reads the local idx files under installDir/Data/data and opens every
+// archive they reference, so the archive map is never written again. With
+// verify set, idx entries are checked against their archive headers and
+// every file read is checked against its MD5.
+func Open(installDir string, verify bool) *Storage {
+	dataDir := filepath.Join(installDir, "Data", "data")
+	archives := idxPackages.NewArchives(dataDir)
+	index := idxPackages.ReadIdxPackages(dataDir, archives, verify)
 	archives.OpenAll(index)
 
 	return &Storage{

@@ -69,7 +69,7 @@ func openTestStorage() (*casc.Storage, root.Root) {
 	config := buildConfig.ReadBuildConfig(cfgData)
 	ckeyHex, ekeyHex := config.GetEncoding()
 
-	storage := casc.Open(false)
+	storage := casc.Open("wardata", false)
 
 	ekey := decodeHex(ekeyHex)
 	encPkg, ok := storage.LookupEKey(ekey)

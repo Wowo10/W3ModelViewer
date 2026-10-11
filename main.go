@@ -65,19 +65,8 @@ func main() {
 	blte.DEBUG = *debug
 	encoding.DEBUG = *debug
 
-	bInfo := readBuildInfo()
-
-	config := readBuildConfig(bInfo.GetBuildKey())
-	ckey, ekey := config.GetEncoding()
-
-	storage := casc.Open(*verify)
+	storage, r, buildKey := openArchive("wardata", *verify)
 	defer storage.Close()
-
-	encodingEntry := findEncodingPackage(storage, ekey)
-	readEncoding(storage, encodingEntry, ckey)
-
-	findRootPackage(storage, config.GetRoot())
-	r := readRoot(storage, config.GetRoot())
 
 	if *extract != "" {
 		extractFile(storage, r, *extract, *outDir)
@@ -102,12 +91,32 @@ func main() {
 	if *webFlag {
 		web.New(storage, r).Serve(*addr)
 	} else if *view || !output {
-		runViewer(storage, r, bInfo.GetBuildKey())
+		runViewer(storage, r, buildKey)
 	}
 }
 
-func readBuildInfo() buildinfo.BuildInfo {
-	data, err := os.ReadFile("wardata/.build.info")
+// openArchive opens the local idx packages under dir and reads the build
+// info, build config, encoding and root files that let storage resolve
+// content keys. It returns the build key from dir's .build.info.
+func openArchive(dir string, verify bool) (*casc.Storage, root.Root, string) {
+	bInfo := readBuildInfo(dir)
+
+	config := readBuildConfig(dir, bInfo.GetBuildKey())
+	ckey, ekey := config.GetEncoding()
+
+	storage := casc.Open(dir, verify)
+
+	encodingEntry := findEncodingPackage(storage, ekey)
+	readEncoding(storage, encodingEntry, ckey)
+
+	findRootPackage(storage, config.GetRoot())
+	r := readRoot(storage, config.GetRoot())
+
+	return storage, r, bInfo.GetBuildKey()
+}
+
+func readBuildInfo(dir string) buildinfo.BuildInfo {
+	data, err := os.ReadFile(filepath.Join(dir, ".build.info"))
 	if err != nil {
 		panic(err)
 	}
@@ -117,8 +126,8 @@ func readBuildInfo() buildinfo.BuildInfo {
 	return buildInfo
 }
 
-func readBuildConfig(filename string) buildConfig.BuildConfig {
-	data, err := os.ReadFile(configPath(filename))
+func readBuildConfig(dir, filename string) buildConfig.BuildConfig {
+	data, err := os.ReadFile(configPath(dir, filename))
 	if err != nil {
 		panic(err)
 	}
@@ -129,8 +138,8 @@ func readBuildConfig(filename string) buildConfig.BuildConfig {
 }
 
 // configPath maps a config hash to its CDN-style location, e.g. ab/cd/abcd....
-func configPath(filename string) string {
-	return "wardata/Data/config/" + filename[0:2] + "/" + filename[2:4] + "/" + filename
+func configPath(dir, filename string) string {
+	return filepath.Join(dir, "Data", "config", filename[0:2], filename[2:4], filename)
 }
 
 // findEncodingPackage looks up the encoding file's location in the local idx packages.
