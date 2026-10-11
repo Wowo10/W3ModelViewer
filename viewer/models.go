@@ -220,11 +220,9 @@ func (p *modelPicker) refresh() {
 	if p.empty == nil {
 		p.empty = make([]bool, len(p.models))
 	}
-	if p.catalog != nil {
-		for i, m := range p.models {
-			if info, ok := p.catalog.Lookup(m.entry.CKey); ok {
-				p.empty[i] = info.Geosets == 0
-			}
+	for i, m := range p.models {
+		if info, ok := p.catalog.Lookup(m.entry.CKey); ok {
+			p.empty[i] = info.Geosets == 0
 		}
 	}
 
