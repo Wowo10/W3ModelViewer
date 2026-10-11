@@ -85,13 +85,19 @@ html, body {
 	display: block;
 }
 
+#model-panel,
+#anim-panel {
+	font-variant-numeric: tabular-nums;
+}
+
 #model-panel {
 	position: absolute;
 	top: 10px;
 	left: 10px;
-	max-width: 420px;
+	width: 420px;
 	bottom: 90px;
 	overflow: auto;
+	scrollbar-gutter: stable;
 	background: rgba(10, 11, 13, 0.75);
 	border: 1px solid #333;
 	padding: 8px;
