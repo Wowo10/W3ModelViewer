@@ -206,6 +206,17 @@ table.model-textures td:first-child {
 	color: #999;
 }
 
+#empty-note {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	max-width: 60%;
+	text-align: center;
+	color: #999;
+	pointer-events: none;
+}
+
 #no-webgl {
 	padding: 16px;
 }

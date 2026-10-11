@@ -66,6 +66,7 @@ async function main() {
 	const rowsEl = /** @type {HTMLElement} */ (document.getElementById("tree-rows"));
 	const panelEl = /** @type {HTMLElement} */ (document.getElementById("model-panel"));
 	const animPanelEl = /** @type {HTMLElement} */ (document.getElementById("anim-panel"));
+	const emptyNote = /** @type {HTMLElement} */ (document.getElementById("empty-note"));
 	const hudEl = /** @type {HTMLElement} */ (document.getElementById("hud"));
 
 	const renderer = new Renderer(gl);
@@ -327,6 +328,8 @@ async function main() {
 		pending = null;
 
 		currentModel = model;
+		emptyNote.textContent = model.contents.explain;
+		emptyNote.hidden = model.geosets.length > 0;
 		currentLOD = lodIndex;
 		currentTextureInfos = textureInfos;
 		currentSeqIndex = seqIndex;
@@ -573,6 +576,7 @@ async function main() {
 
 		panelEl.textContent = "Loading…";
 		animPanelEl.textContent = "";
+		emptyNote.hidden = true;
 
 		try {
 			const model = await getModel(entry.path);
@@ -601,6 +605,7 @@ async function main() {
 			currentSeqIndex = -1;
 			panelControls = null;
 			pending = null;
+			emptyNote.hidden = true;
 			panelEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
 			animPanelEl.textContent = "";
 			animPanelUpdate = () => {};

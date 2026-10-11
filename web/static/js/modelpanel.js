@@ -182,6 +182,9 @@ export function renderModelPanel(container, model, options) {
 	addLine(container, `Version: ${model.version}`);
 	addLine(container, `Chunks: ${model.chunks}`);
 	addLine(container, `Geosets: ${model.geosets.length}`);
+	if (model.contents.explain !== "") {
+		addLine(container, model.contents.explain);
+	}
 
 	/** @type {HTMLElement | null} */
 	let renderingEl = null;
