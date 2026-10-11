@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decodeMesh, visibleBounds } from "../static/js/mesh.js";
+import { decodeMesh, lodLabel, pickLOD, visibleBounds } from "../static/js/mesh.js";
 import { MAX_INFLUENCES } from "../static/js/api.js";
 
 /** @typedef {import("../static/js/api.js").Geoset} Geoset */
@@ -91,13 +91,22 @@ function buildMesh(specs) {
 	return { model, buffer };
 }
 
+/**
+ * offsetsOf is the lowest LOD's offsets, as the server's geosets[].mesh.
+ * @param {Model} model
+ * @returns {(?NonNullable<Geoset["mesh"]>)[]}
+ */
+function offsetsOf(model) {
+	return model.geosets.map((g) => g.mesh);
+}
+
 test("decodeMesh: views equal the input values, null-mesh geosets skipped", () => {
 	const { model, buffer } = buildMesh([
 		{ vertices: 2, triangles: 1, uvSets: 2, alpha: 1 }, // odd index count, exercises padding
 		{ vertices: 3, triangles: 2, uvSets: 0, alpha: 0 },
 	]);
 
-	const decoded = decodeMesh(model, buffer);
+	const decoded = decodeMesh(model, buffer, offsetsOf(model));
 	assert.equal(decoded.length, 2); // the third (mesh: null) geoset is skipped
 
 	const a = decoded[0];
@@ -126,7 +135,7 @@ test("visibleBounds: excludes the alpha-0 geoset", () => {
 		{ vertices: 1, triangles: 1, uvSets: 0, alpha: 0 },
 	]);
 	// Give the two geosets distinct positions so bounds show which contributed.
-	const decoded = decodeMesh(model, buffer);
+	const decoded = decodeMesh(model, buffer, offsetsOf(model));
 	decoded[0].positions.set([1, 2, 3]);
 	decoded[1].positions.set([100, 200, 300]);
 
@@ -136,12 +145,37 @@ test("visibleBounds: excludes the alpha-0 geoset", () => {
 
 test("visibleBounds: null when nothing is visible", () => {
 	const { model, buffer } = buildMesh([{ vertices: 1, triangles: 1, uvSets: 0, alpha: 0 }]);
-	const decoded = decodeMesh(model, buffer);
+	const decoded = decodeMesh(model, buffer, offsetsOf(model));
 	assert.equal(visibleBounds(decoded), null);
 });
 
 test("decodeMesh: out-of-range offsets throw", () => {
 	const { model, buffer } = buildMesh([{ vertices: 1, triangles: 1, uvSets: 0, alpha: 1 }]);
 	/** @type {NonNullable<Geoset["mesh"]>} */ (model.geosets[0].mesh).positions = buffer.byteLength + 100;
-	assert.throws(() => decodeMesh(model, buffer), /geoset 0/);
+	assert.throws(() => decodeMesh(model, buffer, offsetsOf(model)), /geoset 0/);
+});
+
+test("decodeMesh: explicit offsets pick the geosets", () => {
+	const { model, buffer } = buildMesh([
+		{ vertices: 1, triangles: 1, uvSets: 0, alpha: 1 },
+		{ vertices: 2, triangles: 1, uvSets: 0, alpha: 1 },
+	]);
+	const offsets = [null, model.geosets[1].mesh, null];
+	const decoded = decodeMesh(model, buffer, offsets);
+	assert.equal(decoded.length, 1);
+	assert.equal(decoded[0].index, 1);
+	assert.equal(decoded[0].vertices, 2);
+});
+
+test("pickLOD: match, fallback to the lowest, empty", () => {
+	const lods = /** @type {import("../static/js/api.js").LOD[]} */ (/** @type {unknown} */ ([{ lod: 0 }, { lod: 1 }, { lod: 3 }]));
+	assert.equal(pickLOD(lods, 3), 2);
+	assert.equal(pickLOD(lods, 0), 0);
+	assert.equal(pickLOD(lods, 2), 0);
+	assert.equal(pickLOD([], 0), -1);
+});
+
+test("lodLabel", () => {
+	const l = /** @type {import("../static/js/api.js").LOD} */ (/** @type {unknown} */ ({ lod: 3, vertices: 6125, triangles: 7018 }));
+	assert.equal(lodLabel(l), "LOD 3: 6125 vertices, 7018 triangles");
 });

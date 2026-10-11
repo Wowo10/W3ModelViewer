@@ -419,7 +419,7 @@ async function main() {
 			if (token !== loadToken) {
 				return;
 			}
-			const meshBuffer = await getMesh(model);
+			const meshBuffer = await getMesh(model.mesh);
 			if (token !== loadToken) {
 				return;
 			}
@@ -457,7 +457,7 @@ async function main() {
 				return;
 			}
 
-			const decoded = decodeMesh(model, meshBuffer);
+			const decoded = decodeMesh(model, meshBuffer, model.geosets.map((g) => g.mesh));
 
 			const seqIndex = pickSequence(model, currentSeqRef);
 			const frame = seqIndex !== -1 ? sequenceRange(model.sequences[seqIndex]).start : 0;

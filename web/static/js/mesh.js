@@ -35,23 +35,52 @@ function checkView(offset, length, bufferLength, geosetIndex, field) {
 	}
 }
 
+/** @typedef {import("./api.js").LOD} LOD */
+/** @typedef {import("./api.js").MeshOffsets} MeshOffsets */
+
 /**
- * decodeMesh builds one DecodedGeoset per model.geosets entry whose mesh
- * offsets are non-null, as typed-array views into buffer.
+ * pickLOD returns the index in lods of the entry whose lod is want, else 0
+ * (the lowest), else -1 for an empty list.
+ * @param {LOD[]} lods
+ * @param {number} want
+ * @returns {number}
+ */
+export function pickLOD(lods, want) {
+	if (lods.length === 0) {
+		return -1;
+	}
+	const i = lods.findIndex((l) => l.lod === want);
+	return i === -1 ? 0 : i;
+}
+
+/**
+ * lodLabel is a LOD select entry, e.g. "LOD 3: 6125 vertices, 7018
+ * triangles".
+ * @param {LOD} l
+ * @returns {string}
+ */
+export function lodLabel(l) {
+	return `LOD ${l.lod}: ${l.vertices} vertices, ${l.triangles} triangles`;
+}
+
+/**
+ * decodeMesh builds one DecodedGeoset per model.geosets entry whose
+ * offsets entry is non-null, as typed-array views into buffer.
  * @param {Model} model
  * @param {ArrayBuffer} buffer
+ * @param {(?MeshOffsets)[]} offsets - parallel to model.geosets (a LOD's offsets)
  * @returns {DecodedGeoset[]}
  */
-export function decodeMesh(model, buffer) {
+export function decodeMesh(model, buffer, offsets) {
 	/** @type {DecodedGeoset[]} */
 	const out = [];
 
 	for (let i = 0; i < model.geosets.length; i++) {
 		const g = model.geosets[i];
-		if (g.mesh === null) {
+		const off = offsets[i];
+		if (off === null) {
 			continue;
 		}
-		const off = g.mesh;
 		const v = g.vertices;
 		const t = g.triangles;
 

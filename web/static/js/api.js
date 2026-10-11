@@ -101,7 +101,7 @@ export const MAX_INFLUENCES = 8;
  * @property {number} version
  * @property {number} chunks
  * @property {number} objects - len(Pivots()), the pose's matrix count
- * @property {number} lod - the lowest LOD, the one in the mesh
+ * @property {number} lod - the lowest LOD, the one in the top-level mesh
  * @property {number} vertices - total over every geoset
  * @property {number} triangles - total over every geoset
  * @property {Geoset[]} geosets
@@ -109,16 +109,27 @@ export const MAX_INFLUENCES = 8;
  * @property {number} defaultSequence - index into sequences, -1 when none
  * @property {number[]} globalSequences
  * @property {Edition[]} editions - every edition of this asset, including this one
- * @property {MeshRef} mesh
+ * @property {MeshRef} mesh - the lowest LOD's mesh (same as lods[0].mesh)
+ * @property {LOD[]} lods - ascending by lod, one per distinct geoset LOD; empty without geosets
  */
 
 /**
- * The binary layout of GET /api/mesh: per lowest-LOD geoset, in geoset
- * order: positions float32[3v], normals float32[3v] (zeros when the
+ * @typedef {Object} LOD
+ * @property {number} lod
+ * @property {number} geosets - count at this LOD
+ * @property {number} vertices
+ * @property {number} triangles
+ * @property {MeshRef} mesh - GET /api/mesh?path=&lod=
+ * @property {(?MeshOffsets)[]} offsets - parallel to Model.geosets, null for geosets at another LOD
+ */
+
+/**
+ * The binary layout of GET /api/mesh?path=&lod= (default the lowest): per
+ * geoset at that LOD, in geoset order: positions float32[3v], normals float32[3v] (zeros when the
  * geoset has none), each UV set float32[2v], weights float32[8v], node
  * object ids uint32[8v] (MAX_INFLUENCES per vertex), indices uint16[3t]
- * padded to 4 bytes. A Geoset's "mesh" MeshOffsets give byte offsets into
- * this buffer.
+ * padded to 4 bytes. A LOD's "offsets" (for the lowest LOD also each
+ * Geoset's "mesh") give byte offsets into this buffer.
  */
 
 /**
@@ -162,12 +173,12 @@ export async function getModel(path) {
 }
 
 /**
- * getMesh fetches model.mesh.url (GET /api/mesh?path=).
- * @param {Model} model
+ * getMesh fetches ref.url (GET /api/mesh?path=&lod=).
+ * @param {MeshRef} ref
  * @returns {Promise<ArrayBuffer>}
  */
-export async function getMesh(model) {
-	const resp = await checkOK(await fetch(model.mesh.url));
+export async function getMesh(ref) {
+	const resp = await checkOK(await fetch(ref.url));
 	return resp.arrayBuffer();
 }
 
