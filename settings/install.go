@@ -47,6 +47,20 @@ func CheckInstall(dir string) error {
 	return nil
 }
 
+// BuildKey returns dir's build key, or "" if its .build.info is missing or
+// malformed. It assumes CheckInstall(dir) already passed; it's for display.
+func BuildKey(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, ".build.info"))
+	if err != nil {
+		return ""
+	}
+	key, err := readBuildKey(data)
+	if err != nil {
+		return ""
+	}
+	return key
+}
+
 // readBuildKey parses data as a .build.info file and returns its build key,
 // recovering from the panics buildinfo.ReadBuildInfo raises on malformed
 // input. It requires a 32-char hex key.

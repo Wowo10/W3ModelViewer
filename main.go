@@ -17,6 +17,7 @@ import (
 	"modelView/model/catalog"
 	"modelView/model/mdx"
 	"modelView/model/texture"
+	"modelView/settings"
 	"modelView/viewer"
 	"modelView/web"
 	"os"
@@ -47,7 +48,7 @@ func main() {
 	flag.Usage = func() {
 		w := flag.CommandLine.Output()
 		fmt.Fprintf(w, "Usage of %s:\n", os.Args[0])
-		fmt.Fprintln(w, "Opens the model viewer on wardata/. With an output flag (-list, -variants, -extract, -mdxinfo, -survey) it prints that instead and doesn't open the viewer, unless -view is also given. -web serves the web viewer instead of opening the desktop one.")
+		fmt.Fprintln(w, "Opens the desktop viewer on the install folder saved in modelViewer.json (asking for it when unset). With an output flag (-list, -variants, -extract, -mdxinfo, -survey) it prints that instead and doesn't open the viewer, unless -view is also given; those and -web read wardata/.")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -65,33 +66,37 @@ func main() {
 	blte.DEBUG = *debug
 	encoding.DEBUG = *debug
 
-	storage, r, buildKey := openArchive("wardata", *verify)
-	defer storage.Close()
+	if output {
+		storage, r, _ := openArchive("wardata", *verify)
+		defer storage.Close()
 
-	if *extract != "" {
-		extractFile(storage, r, *extract, *outDir)
+		if *extract != "" {
+			extractFile(storage, r, *extract, *outDir)
+		}
+
+		if *list {
+			listFiles(storage, r, *filter, *edition)
+		}
+
+		if *variants != "" {
+			printVariants(storage, r, *variants)
+		}
+
+		if *mdxinfo != "" {
+			printMDXInfo(storage, r, *mdxinfo)
+		}
+
+		if *survey {
+			surveyFiles(storage, r)
+		}
+
+		if *webFlag {
+			web.New(storage, r).Serve(*addr)
+		}
 	}
 
-	if *list {
-		listFiles(storage, r, *filter, *edition)
-	}
-
-	if *variants != "" {
-		printVariants(storage, r, *variants)
-	}
-
-	if *mdxinfo != "" {
-		printMDXInfo(storage, r, *mdxinfo)
-	}
-
-	if *survey {
-		surveyFiles(storage, r)
-	}
-
-	if *webFlag {
-		web.New(storage, r).Serve(*addr)
-	} else if *view || !output {
-		runViewer(storage, r, buildKey)
+	if *view || !output {
+		runViewer(*verify)
 	}
 }
 
@@ -519,9 +524,27 @@ func decodeKey(key string) []byte {
 	return decoded
 }
 
-func runViewer(storage *casc.Storage, r root.Root, buildKey string) {
-	cat := catalog.Start(storage, r, buildKey, catalog.CacheDir())
-	if err := viewer.Run(viewer.DefaultConfig(), storage, r, cat); err != nil {
+// runViewer opens the desktop viewer on the install folder saved in
+// modelViewer.json, asking for it when it's unset or invalid. Path only
+// fails when os.Executable or os.Getwd fail, which isn't handled.
+func runViewer(verify bool) {
+	path, err := settings.Path()
+	if err != nil {
+		panic(err)
+	}
+	s, settingsErr := settings.Load(path)
+
+	start := viewer.Startup{
+		SettingsPath: path,
+		Settings:     s,
+		SettingsErr:  settingsErr,
+		Open: func(dir string) (*casc.Storage, root.Root, *catalog.Catalog) {
+			storage, r, buildKey := openArchive(dir, verify)
+			return storage, r, catalog.Start(storage, r, buildKey, catalog.CacheDir())
+		},
+	}
+
+	if err := viewer.Run(viewer.DefaultConfig(), start); err != nil {
 		fmt.Fprintln(os.Stderr, "viewer:", err)
 		os.Exit(1)
 	}

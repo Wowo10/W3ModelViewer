@@ -14,11 +14,9 @@ import (
 
 // uiState keeps whatever the panels need between frames.
 type uiState struct {
-	storage    *casc.Storage
-	root       root.Root
-	models     *modelPicker
-	quit       bool
-	clearColor [3]float32
+	storage *casc.Storage
+	root    root.Root
+	models  *modelPicker
 
 	program    *meshProgram
 	mesh       modelMesh
@@ -41,14 +39,13 @@ type teamTextures struct {
 
 func newUIState(storage *casc.Storage, r root.Root, cat *catalog.Catalog) *uiState {
 	return &uiState{
-		storage:    storage,
-		root:       r,
-		models:     newModelPicker(storage, r, cat),
-		clearColor: [3]float32{0.10, 0.11, 0.13},
-		program:    newMeshProgram(),
-		meshFor:    -1,
-		pose:       newPoseBuffer(),
-		team:       teamTextures{player: -1},
+		storage: storage,
+		root:    r,
+		models:  newModelPicker(storage, r, cat),
+		program: newMeshProgram(),
+		meshFor: -1,
+		pose:    newPoseBuffer(),
+		team:    teamTextures{player: -1},
 	}
 }
 

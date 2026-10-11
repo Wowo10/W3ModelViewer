@@ -16,6 +16,7 @@ import (
 	"modelView/extract/casc"
 	"modelView/extract/root"
 	"modelView/model/catalog"
+	"modelView/settings"
 )
 
 // Config describes the window to open.
@@ -30,14 +31,28 @@ func DefaultConfig() Config {
 	return Config{Title: "modelViewer", Width: 1280, Height: 720}
 }
 
+// Startup carries what the viewer needs before it can open an install:
+// where modelViewer.json lives, what it held on start (or the error loading
+// it), and how to open an install directory once one is chosen.
+type Startup struct {
+	SettingsPath string
+	Settings     settings.Settings
+	SettingsErr  error
+	Open         func(dir string) (*casc.Storage, root.Root, *catalog.Catalog)
+}
+
 // glslVersion matches the 3.2 core profile requested below.
 const glslVersion = "#version 150"
 
-// Run opens the window and pumps events until the user closes it. storage and
-// r let the UI read model files; the viewer does no file I/O of its own. cat
-// is the background model scan started alongside it, polled by the Models
-// window.
-func Run(cfg Config, storage *casc.Storage, r root.Root, cat *catalog.Catalog) error {
+// bgColor is the GL clear color in every phase.
+var bgColor = [3]float32{0.10, 0.11, 0.13}
+
+// Run opens the window and pumps events until the user closes it. With a
+// valid configured install it loads it in the background while the window
+// shows a loading state; otherwise it shows a setup window asking for the
+// install folder. The viewer does no file I/O itself, other than reading
+// directories for the folder browser; start.Open does the rest.
+func Run(cfg Config, start Startup) error {
 	// The GL context is bound to one OS thread, so this goroutine must stay put.
 	runtime.LockOSThread()
 
@@ -81,18 +96,18 @@ func Run(cfg Config, storage *casc.Storage, r root.Root, cat *catalog.Catalog) e
 	}
 	defer opengl3.Shutdown()
 
-	ui := newUIState(storage, r, cat)
-	defer ui.release()
+	app := newAppState(start)
+	defer app.release()
 
-	for !ui.quit {
-		pollEvents(window, ui)
+	for !app.quit {
+		pollEvents(window, app)
 
 		if window.GetFlags()&sdl.WINDOW_MINIMIZED != 0 {
 			sdl.Delay(10)
 			continue
 		}
 
-		renderFrame(window, ui)
+		renderFrame(window, app)
 	}
 
 	return nil
@@ -153,54 +168,61 @@ func configureImGui() {
 }
 
 // pollEvents drains the SDL queue, forwarding everything to ImGui and
-// flagging ui.quit when the window is closed.
-func pollEvents(window *sdl.Window, ui *uiState) {
+// flagging app.quit when the window is closed. The camera only reacts to
+// mouse input once a model is loaded (app.ui is set).
+func pollEvents(window *sdl.Window, app *appState) {
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 		processEvent(event)
 
 		switch e := event.(type) {
 		case *sdl.QuitEvent:
-			ui.quit = true
+			app.quit = true
 		case *sdl.WindowEvent:
 			if e.Event == sdl.WINDOWEVENT_CLOSE && e.WindowID == windowID(window) {
-				ui.quit = true
+				app.quit = true
 			}
 		case *sdl.MouseMotionEvent:
-			if !imgui.CurrentIO().WantCaptureMouse() && e.State&sdl.ButtonLMask() != 0 {
-				ui.camera.rotate(float32(e.XRel), float32(e.YRel))
+			if app.ui != nil && !imgui.CurrentIO().WantCaptureMouse() && e.State&sdl.ButtonLMask() != 0 {
+				app.ui.camera.rotate(float32(e.XRel), float32(e.YRel))
 			}
 		case *sdl.MouseWheelEvent:
-			if !imgui.CurrentIO().WantCaptureMouse() {
+			if app.ui != nil && !imgui.CurrentIO().WantCaptureMouse() {
 				steps := e.PreciseY
 				if steps == 0 {
 					steps = float32(e.Y)
 				}
-				ui.camera.zoom(steps)
+				app.ui.camera.zoom(steps)
 			}
 		}
 	}
 }
 
-func renderFrame(window *sdl.Window, ui *uiState) {
+// renderFrame draws the current phase's ImGui windows (and syncs and draws
+// the mesh once a model is loaded), then swaps buffers.
+func renderFrame(window *sdl.Window, app *appState) {
 	opengl3.NewFrame()
 	sdl2.NewFrame()
 	imgui.NewFrame()
 
-	ui.draw()
-	rebuilt := ui.syncMesh()
-	ui.syncPose(rebuilt)
-	ui.syncTeam()
+	app.draw()
+
+	var rebuilt bool
+	if app.ui != nil {
+		rebuilt = app.ui.syncMesh()
+		app.ui.syncPose(rebuilt)
+		app.ui.syncTeam()
+	}
 
 	imgui.Render()
 
 	w, h := window.GLGetDrawableSize()
 	gl.Viewport(0, 0, w, h)
-	gl.ClearColor(ui.clearColor[0], ui.clearColor[1], ui.clearColor[2], 1)
+	gl.ClearColor(bgColor[0], bgColor[1], bgColor[2], 1)
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-	if h > 0 && len(ui.mesh.geosets) > 0 {
-		view, proj := ui.camera.matrices(float32(w) / float32(h))
-		ui.mesh.draw(ui.program, view, proj, ui.team, ui.models.model.alphas, ui.pose.texture)
+	if app.ui != nil && h > 0 && len(app.ui.mesh.geosets) > 0 {
+		view, proj := app.ui.camera.matrices(float32(w) / float32(h))
+		app.ui.mesh.draw(app.ui.program, view, proj, app.ui.team, app.ui.models.model.alphas, app.ui.pose.texture)
 	}
 
 	opengl3.RenderDrawData(imgui.CurrentDrawData())
