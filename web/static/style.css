@@ -90,7 +90,7 @@ html, body {
 	top: 10px;
 	left: 10px;
 	max-width: 420px;
-	max-height: calc(100% - 20px);
+	bottom: 90px;
 	overflow: auto;
 	background: rgba(10, 11, 13, 0.75);
 	border: 1px solid #333;
@@ -164,6 +164,10 @@ table.model-textures td:first-child {
 	align-items: center;
 	gap: 10px;
 	flex-wrap: wrap;
+}
+
+#anim-panel:empty {
+	display: none;
 }
 
 #anim-panel select {
