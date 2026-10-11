@@ -25,7 +25,7 @@ function noopUpdate() {}
 /**
  * renderAnimPanel rebuilds container's contents for model's sequences and
  * play's current state, wiring callbacks to the controls. Returns
- * update(frame), which moves the frame slider and its label while playing
+ * update(frame), which moves the frame slider while playing
  * (a no-op while scrubbing, so dragging isn't fought over, and when there
  * is no slider to move).
  * @param {HTMLElement} container
@@ -112,19 +112,15 @@ export function renderAnimPanel(container, model, seqIndex, play, callbacks) {
 	frameInput.step = "1";
 	const initialFrame = Math.floor(play.frame);
 	frameInput.value = String(initialFrame);
-	const frameValue = document.createElement("span");
-	frameValue.textContent = String(initialFrame);
 	frameInput.addEventListener("pointerdown", () => callbacks.onScrubStart());
 	frameInput.addEventListener("pointerup", () => callbacks.onScrubEnd());
 	frameInput.addEventListener("pointercancel", () => callbacks.onScrubEnd());
 	frameInput.addEventListener("change", () => callbacks.onScrubEnd());
 	frameInput.addEventListener("input", () => {
 		const v = Number(frameInput.value);
-		frameValue.textContent = String(v);
 		callbacks.onFrameInput(v);
 	});
 	frameLabel.appendChild(frameInput);
-	frameLabel.appendChild(frameValue);
 	container.appendChild(frameLabel);
 
 	return (frame) => {
@@ -132,6 +128,5 @@ export function renderAnimPanel(container, model, seqIndex, play, callbacks) {
 			return;
 		}
 		frameInput.value = String(frame);
-		frameValue.textContent = String(frame);
 	};
 }
