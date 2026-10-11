@@ -249,6 +249,8 @@ export class Renderer {
 		this.matrixTexture = null;
 		this.matrixWidth = 0;
 		this.matrixHeight = 0;
+		/** @type {Float32Array | null} - reused across setPose calls, sized width*height*4 */
+		this.poseBuffer = null;
 		/** @type {Float32Array | null} - one per geoset, from the last setPose; draw skips until set */
 		this.alphas = null;
 	}
@@ -363,6 +365,7 @@ export class Renderer {
 		this.matrixTexture = texture;
 		this.matrixWidth = size.width;
 		this.matrixHeight = size.height;
+		this.poseBuffer = new Float32Array(size.width * size.height * 4);
 		this.alphas = null;
 	}
 
@@ -375,15 +378,14 @@ export class Renderer {
 	 */
 	setPose(matrices, alphas) {
 		const gl = this.gl;
-		if (!this.matrixTexture) {
+		if (!this.matrixTexture || !this.poseBuffer) {
 			return;
 		}
 
-		const padded = new Float32Array(this.matrixWidth * this.matrixHeight * 4);
-		padded.set(matrices);
+		this.poseBuffer.set(matrices);
 
 		gl.bindTexture(gl.TEXTURE_2D, this.matrixTexture);
-		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.matrixWidth, this.matrixHeight, gl.RGBA, gl.FLOAT, padded);
+		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.matrixWidth, this.matrixHeight, gl.RGBA, gl.FLOAT, this.poseBuffer);
 		gl.bindTexture(gl.TEXTURE_2D, null);
 
 		this.alphas = alphas;
@@ -420,6 +422,7 @@ export class Renderer {
 			gl.deleteTexture(this.matrixTexture);
 			this.matrixTexture = null;
 		}
+		this.poseBuffer = null;
 		this.alphas = null;
 		for (const t of this.textures.values()) {
 			gl.deleteTexture(t.texture);
