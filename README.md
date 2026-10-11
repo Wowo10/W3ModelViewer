@@ -48,8 +48,12 @@ window plays its sequences. Drag to rotate, scroll to zoom.
 
 **Web viewer.** The same viewer as a page: the tree, model panel and
 animation panel. Textures upload compressed when the browser supports S3TC
-and RGTC, otherwise they're decoded in JavaScript (`?cpu=1` forces that). Use
-`-addr` to change the port; only loopback addresses are accepted.
+and RGTC, otherwise they're decoded in JavaScript (`?cpu=1` forces that). Like
+the desktop viewer, the page hides models with no geometry (a "show models
+without geometry" checkbox brings them back, with an explanation when opened)
+and shows the scan's progress; the scan and its cache are shared with the
+desktop viewer. Use `-addr` to change the port; only loopback addresses are
+accepted.
 
 **Command-line output.** Instead of opening the viewer:
 
@@ -96,8 +100,8 @@ from.
 | `web/` | web server and API; `web/static/` is the embedded page (JavaScript modules, WebGL2) |
 | `main.go` | flags and command-line output |
 
-The web API (`/api/models`, `/api/model`, `/api/mesh`, `/api/texture`,
-`/api/pose`) is documented in the `web` package's doc comment.
+The web API (`/api/models`, `/api/scan`, `/api/model`, `/api/mesh`,
+`/api/texture`, `/api/pose`) is documented in the `web` package's doc comment.
 
 ## Development
 
