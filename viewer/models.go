@@ -27,6 +27,7 @@ type selectedModel struct {
 	version  uint32
 	chunks   int
 	geosets  []mdx.Geoset
+	explain  string            // catalog.Info.Explain(), set when geosets is empty
 	priority []int32           // one per geoset, its material's priority plane
 	layers   [][]texture.Layer // one slice per geoset, one texture.Layer per material layer
 
@@ -298,8 +299,11 @@ func (p *modelPicker) loadModel(idx int) {
 	var geosetAnims []mdx.GeosetAnim
 	var globals []uint32
 	var pivots int
+	var explain string
 
-	if len(geosets) > 0 {
+	if len(geosets) == 0 {
+		explain = catalog.Inspect(m).Explain()
+	} else {
 		materials := m.Materials()
 		textures := m.Textures()
 		priority = make([]int32, len(geosets))
@@ -336,6 +340,7 @@ func (p *modelPicker) loadModel(idx int) {
 		version:     m.Version,
 		chunks:      len(m.Chunks),
 		geosets:     geosets,
+		explain:     explain,
 		priority:    priority,
 		layers:      layers,
 		lods:        lods,
@@ -631,6 +636,9 @@ func (p *modelPicker) drawModel() {
 			imgui.Text(fmt.Sprintf("Version: %d", m.version))
 			imgui.Text(fmt.Sprintf("Chunks: %d", m.chunks))
 			imgui.Text(fmt.Sprintf("Geosets: %d", len(m.geosets)))
+			if m.explain != "" {
+				imgui.TextWrapped(m.explain)
+			}
 
 			if len(p.group) > 1 {
 				imgui.Separator()
