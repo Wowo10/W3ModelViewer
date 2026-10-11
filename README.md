@@ -13,21 +13,31 @@ web viewer only listens on localhost.
 - Go 1.27 or newer.
 - SDL2 and an OpenGL 3.2 driver for the desktop viewer (the Go bindings use
   cgo, so a C compiler too).
-- A Warcraft III installation. Copy or symlink its directory (the one with
-  `.build.info` and `Data/`) to `wardata/` in the repository root.
+- A Warcraft III installation (the directory with `.build.info` and
+  `Data/`). The desktop viewer asks for it on first start and saves it in
+  `modelViewer.json` next to the binary (or the working directory, under
+  `go run`). Output flags, `-web` and the tests read a copy or symlink of
+  it at `wardata/` in the repository root.
 - Node.js only to check the web page's JavaScript; running it needs only a
   browser with WebGL2.
 
 ## Running
 
 ```sh
-go run .            # desktop viewer
-go run . -web       # web viewer on http://127.0.0.1:8080
-go run . -h         # every flag
+make run                    # desktop viewer
+make run ARGS=-web          # web viewer on http://127.0.0.1:8080
+make run ARGS=-h            # every flag
 ```
 
-**Desktop viewer.** Pick a model in the directory tree (with a text filter
-and an edition select). Models with no geometry (particle effects and the
+`go run .` also works, but builds into a temporary directory, so
+`modelViewer.json` ends up in the working directory instead of next to the
+binary; `make run` keeps both in the repository root.
+
+**Desktop viewer.** On first start (or with no valid install configured) a
+setup window asks for the Warcraft III install folder: type a path or use
+"Browse..." (the system's folder picker, or a built-in one when none is
+available). Once it's saved, pick a model in the directory tree (with a text
+filter and an edition select). Models with no geometry (particle effects and the
 like) are hidden by default; a "show models without geometry" checkbox
 brings them back, each with a short explanation of what it holds instead.
 A background scan builds this the first time (progress shown in the Models
@@ -81,6 +91,7 @@ from.
 | `model/mdx` | MDX parsing (geosets, materials, textures, sequences, bones, skinning) and pose evaluation |
 | `model/texture` | texture path resolution, DDS headers, drawable layers |
 | `model/catalog` | background scan for geometry/effect counts per model, cached on disk |
+| `settings/` | `modelViewer.json` location, loading/saving and install folder validation |
 | `viewer/` | desktop viewer (SDL2, OpenGL 3.2, Dear ImGui via cimgui-go) |
 | `web/` | web server and API; `web/static/` is the embedded page (JavaScript modules, WebGL2) |
 | `main.go` | flags and command-line output |
