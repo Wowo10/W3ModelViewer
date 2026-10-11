@@ -111,6 +111,8 @@ type modelPicker struct {
 
 	player int32    // index into playerNames, default 0 = red; which TeamColorNN/TeamGlowNN to draw
 	play   playback // the Animation window's play/pause/loop/speed state, kept across model switches
+
+	lod uint32 // the user's chosen LOD value, sticky across model/edition switches; 0 at start
 }
 
 // playerNames is the team colour combo's entries: the 24 standard player
@@ -127,33 +129,34 @@ var playerNames = []string{
 // modelCounts summarizes one edition's geometry for the side-by-side
 // editions table.
 type modelCounts struct {
-	version                   uint32
-	geosets, lods             int
-	lod                       uint32
-	lodVertices, lodTriangles int
-	vertices, triangles       int
+	version             uint32
+	geosets             int
+	lods                []mdx.LODTotal
+	vertices, triangles int
 }
 
 // countGeosets computes modelCounts for a model's version and geosets.
 func countGeosets(version uint32, geosets []mdx.Geoset) modelCounts {
-	c := modelCounts{version: version, geosets: len(geosets)}
-	if len(geosets) == 0 {
-		return c
-	}
-
-	lods := map[uint32]bool{}
-	c.lod = mdx.LowestLOD(geosets)
+	c := modelCounts{version: version, geosets: len(geosets), lods: mdx.LODTotals(geosets)}
 	for _, g := range geosets {
-		lods[g.LOD] = true
 		c.vertices += g.VertexCount()
 		c.triangles += g.TriangleCount()
-		if g.LOD == c.lod {
-			c.lodVertices += g.VertexCount()
-			c.lodTriangles += g.TriangleCount()
+	}
+	return c
+}
+
+// pickLOD returns the index into lods of the entry whose LOD == want, else
+// 0 (the lowest LOD); -1 when lods is empty.
+func pickLOD(lods []mdx.LODTotal, want uint32) int {
+	if len(lods) == 0 {
+		return -1
+	}
+	for i, t := range lods {
+		if t.LOD == want {
+			return i
 		}
 	}
-	c.lods = len(lods)
-	return c
+	return 0
 }
 
 // newModelPicker collects every root entry whose Name ends in ".mdx" (case-
@@ -471,30 +474,46 @@ func (p *modelPicker) drawEditionsTable() {
 		imgui.TextUnformatted(row.label)
 		for _, idx := range p.group {
 			imgui.TableNextColumn()
-			imgui.TextUnformatted(row.value(p.counts[p.models[idx].entry.CKey]))
+			imgui.TextUnformatted(row.value(p.counts[p.models[idx].entry.CKey], p.lod))
 		}
 	}
 }
 
 // editionsTableRows are the rows of drawEditionsTable, built once since they
-// hold no per-frame state.
+// hold no per-frame state. Each value is given the edition's modelCounts
+// and the viewer's chosen LOD value; the three LOD rows look up that
+// edition's rendered LOD with pickLOD (its own lowest LOD when the edition
+// doesn't have the chosen value).
 var editionsTableRows = []struct {
 	label string
-	value func(modelCounts) string
+	value func(modelCounts, uint32) string
 }{
-	{"version", func(c modelCounts) string { return fmt.Sprintf("%d", c.version) }},
-	{"geosets", func(c modelCounts) string { return fmt.Sprintf("%d", c.geosets) }},
-	{"LODs", func(c modelCounts) string { return fmt.Sprintf("%d", c.lods) }},
-	{"rendered LOD", func(c modelCounts) string {
-		if c.geosets == 0 {
+	{"version", func(c modelCounts, lod uint32) string { return fmt.Sprintf("%d", c.version) }},
+	{"geosets", func(c modelCounts, lod uint32) string { return fmt.Sprintf("%d", c.geosets) }},
+	{"LODs", func(c modelCounts, lod uint32) string { return fmt.Sprintf("%d", len(c.lods)) }},
+	{"rendered LOD", func(c modelCounts, lod uint32) string {
+		i := pickLOD(c.lods, lod)
+		if i == -1 {
 			return "-"
 		}
-		return fmt.Sprintf("%d", c.lod)
+		return fmt.Sprintf("%d", c.lods[i].LOD)
 	}},
-	{"LOD vertices", func(c modelCounts) string { return fmt.Sprintf("%d", c.lodVertices) }},
-	{"LOD triangles", func(c modelCounts) string { return fmt.Sprintf("%d", c.lodTriangles) }},
-	{"total vertices", func(c modelCounts) string { return fmt.Sprintf("%d", c.vertices) }},
-	{"total triangles", func(c modelCounts) string { return fmt.Sprintf("%d", c.triangles) }},
+	{"LOD vertices", func(c modelCounts, lod uint32) string {
+		i := pickLOD(c.lods, lod)
+		if i == -1 {
+			return "0"
+		}
+		return fmt.Sprintf("%d", c.lods[i].Vertices)
+	}},
+	{"LOD triangles", func(c modelCounts, lod uint32) string {
+		i := pickLOD(c.lods, lod)
+		if i == -1 {
+			return "0"
+		}
+		return fmt.Sprintf("%d", c.lods[i].Triangles)
+	}},
+	{"total vertices", func(c modelCounts, lod uint32) string { return fmt.Sprintf("%d", c.vertices) }},
+	{"total triangles", func(c modelCounts, lod uint32) string { return fmt.Sprintf("%d", c.triangles) }},
 }
 
 // drawModel shows the "Model" window: the selected model's path, version,
