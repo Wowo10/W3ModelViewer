@@ -6,11 +6,12 @@ import (
 	"time"
 
 	"github.com/AllenDang/cimgui-go/imgui"
+	"github.com/ncruces/zenity"
 	"modelView/settings"
 )
 
-// setupState is the setup window: a path field the user edits, checked
-// against settings.CheckInstall as they type.
+// setupState is the setup window: a path field the user edits or fills in
+// with a folder picker, checked against settings.CheckInstall as they type.
 type setupState struct {
 	start Startup
 
@@ -21,6 +22,14 @@ type setupState struct {
 	path     string
 	checkErr error // settings.CheckInstall(path), re-run only when path changes
 	saveErr  error // settings.Save's error, shown and left in setup when set
+
+	browseCh chan browseResult // non-nil while the native dialog is open
+	browser  *folderBrowser    // non-nil while the ImGui fallback is open
+}
+
+type browseResult struct {
+	path string
+	err  error
 }
 
 func newSetupState(start Startup) *setupState {
@@ -55,6 +64,8 @@ func (s *setupState) checkPath() {
 // draw shows the setup window and, once the user picks a valid folder and
 // confirms, starts loading it through app.startLoading.
 func (s *setupState) draw(app *appState) {
+	s.pollBrowse()
+
 	display := imgui.CurrentIO().DisplaySize()
 	imgui.SetNextWindowPosV(imgui.Vec2{X: display.X / 2, Y: display.Y / 2}, imgui.CondFirstUseEver, imgui.Vec2{X: 0.5, Y: 0.5})
 	imgui.SetNextWindowSizeV(imgui.Vec2{X: 560, Y: 0}, imgui.CondFirstUseEver)
@@ -78,6 +89,13 @@ func (s *setupState) draw(app *appState) {
 			s.checkPath()
 		}
 
+		imgui.SameLineV(0, -1)
+		imgui.BeginDisabledV(s.browseCh != nil)
+		if imgui.Button("Browse...") {
+			s.browse()
+		}
+		imgui.EndDisabled()
+
 		if s.checkErr != nil {
 			imgui.TextColored(imgui.Vec4{X: 1, Y: 0.7, Z: 0.3, W: 1}, s.checkErr.Error())
 		} else {
@@ -91,6 +109,10 @@ func (s *setupState) draw(app *appState) {
 		imgui.EndDisabled()
 	}
 	imgui.End()
+
+	if s.browser != nil {
+		s.browser.draw(s)
+	}
 }
 
 // buildKeyPrefix returns the first 8 characters of dir's build key, for the
@@ -101,6 +123,45 @@ func buildKeyPrefix(dir string) string {
 		return key
 	}
 	return key[:8]
+}
+
+// browse opens the native folder picker on a goroutine, falling back to the
+// ImGui browser when zenity isn't available.
+func (s *setupState) browse() {
+	if !zenity.IsAvailable() {
+		s.browser = newFolderBrowser(s.path)
+		return
+	}
+
+	ch := make(chan browseResult, 1)
+	s.browseCh = ch
+	start := s.path
+	go func() {
+		dir, err := zenity.SelectFile(zenity.Directory(), zenity.Filename(start), zenity.Title("Choose the Warcraft III install folder"))
+		ch <- browseResult{path: dir, err: err}
+	}()
+}
+
+// pollBrowse checks for the native dialog's result without blocking.
+func (s *setupState) pollBrowse() {
+	if s.browseCh == nil {
+		return
+	}
+
+	select {
+	case res := <-s.browseCh:
+		s.browseCh = nil
+		switch {
+		case res.err == nil:
+			s.path = res.path
+			s.checkPath()
+		case res.err == zenity.ErrCanceled:
+			// Nothing changes.
+		default:
+			s.browser = newFolderBrowser(s.path)
+		}
+	default:
+	}
 }
 
 // open saves the confirmed path and starts loading it, staying in setup on
