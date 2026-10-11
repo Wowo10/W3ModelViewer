@@ -1,5 +1,7 @@
 **/wardata/**
 imgui.ini
+/modelViewer
+/modelViewer.json
 web/node_modules/
 .claude/*
 !.claude/skills/
