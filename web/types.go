@@ -131,6 +131,17 @@ type meshRef struct {
 	Size int    `json:"size"`
 }
 
+// lodRef is one entry of a modelResponse's "lods" array: a LOD's totals,
+// its mesh and its geosets' offsets into it.
+type lodRef struct {
+	LOD       uint32         `json:"lod"`
+	Geosets   int            `json:"geosets"`
+	Vertices  int            `json:"vertices"`
+	Triangles int            `json:"triangles"`
+	Mesh      meshRef        `json:"mesh"`
+	Offsets   []*meshOffsets `json:"offsets"`
+}
+
 // modelResponse is /api/model's body.
 type modelResponse struct {
 	Path            string        `json:"path"`
@@ -150,6 +161,7 @@ type modelResponse struct {
 	GlobalSequences []uint32      `json:"globalSequences"`
 	Editions        []editionRef  `json:"editions"`
 	Mesh            meshRef       `json:"mesh"`
+	LODs            []lodRef      `json:"lods"`
 }
 
 // overlaysOrEmpty returns entry.Variant.Overlays, or an empty (never nil)

@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"modelView/extract/root"
 	"modelView/model/mdx"
@@ -30,9 +31,43 @@ type loaded struct {
 	geosetAnims []mdx.GeosetAnim
 	globals     []uint32
 
-	lod         uint32
-	mesh        []byte
-	meshOffsets []*meshOffsets // one per geoset, nil for geosets not at lod
+	lods   []mdx.LODTotal // ascending, parallel to meshes; nil without geosets
+	meshes []lodMesh
+}
+
+// lodMesh is one LOD's mesh buffer and its geosets' offsets into it.
+type lodMesh struct {
+	lod     uint32
+	buf     []byte
+	offsets []*meshOffsets // one per geoset, nil for geosets not at lod
+}
+
+// lowest returns the lowest LOD's mesh, or an empty one (no buffer, no
+// offsets) for a model without geosets.
+func (m *loaded) lowest() lodMesh {
+	if len(m.meshes) == 0 {
+		return lodMesh{offsets: make([]*meshOffsets, len(m.geosets))}
+	}
+	return m.meshes[0]
+}
+
+// meshFor returns the mesh of the given LOD value.
+func (m *loaded) meshFor(lod uint32) (lodMesh, bool) {
+	for _, lm := range m.meshes {
+		if lm.lod == lod {
+			return lm, true
+		}
+	}
+	return lodMesh{}, false
+}
+
+// meshBytes is the total size of every LOD's buffer, the cache's cost.
+func (m *loaded) meshBytes() int64 {
+	var n int64
+	for _, lm := range m.meshes {
+		n += int64(len(lm.buf))
+	}
+	return n
 }
 
 // load reads and parses the model at entry, building everything load's
@@ -63,8 +98,11 @@ func (s *Server) load(idx int) *loaded {
 		l.globals = m.GlobalSequences()
 	}
 
-	l.lod = mdx.LowestLOD(geosets)
-	l.mesh, l.meshOffsets = buildMesh(geosets, l.lod)
+	l.lods = mdx.LODTotals(geosets)
+	for _, t := range l.lods {
+		buf, offsets := buildMesh(geosets, t.LOD)
+		l.meshes = append(l.meshes, lodMesh{lod: t.LOD, buf: buf, offsets: offsets})
+	}
 
 	return l
 }
@@ -90,7 +128,7 @@ func (s *Server) getLoaded(idx int) *loaded {
 		return m
 	}
 	m := s.load(idx)
-	s.cache.put(entry.CKey, m, int64(len(m.mesh)), s.CacheBound)
+	s.cache.put(entry.CKey, m, m.meshBytes(), s.CacheBound)
 	return m
 }
 
@@ -195,6 +233,8 @@ func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
 	}
 	alphas := mdx.GeosetAlphasAtTime(len(m.geosets), m.geosetAnims, m.globals, at, hasSeq)
 
+	lowest := m.lowest()
+
 	resp := modelResponse{
 		Path:            entry.Path,
 		Name:            entry.Name,
@@ -204,12 +244,25 @@ func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
 		Version:         m.version,
 		Chunks:          m.chunks,
 		Objects:         m.objects,
-		LOD:             m.lod,
+		LOD:             mdx.LowestLOD(m.geosets),
 		Geosets:         make([]geosetRef, len(m.geosets)),
 		Sequences:       make([]sequenceRef, len(m.sequences)),
 		DefaultSequence: defSeq,
 		GlobalSequences: uint32sOrEmpty(m.globals),
-		Mesh:            meshRef{URL: "/api/mesh?path=" + url.QueryEscape(entry.Path), Size: len(m.mesh)},
+		Mesh:            meshRef{URL: meshURL(entry.Path, nil), Size: len(lowest.buf)},
+		LODs:            make([]lodRef, len(m.lods)),
+	}
+
+	for i, t := range m.lods {
+		lod := t.LOD
+		resp.LODs[i] = lodRef{
+			LOD:       t.LOD,
+			Geosets:   t.Geosets,
+			Vertices:  t.Vertices,
+			Triangles: t.Triangles,
+			Mesh:      meshRef{URL: meshURL(entry.Path, &lod), Size: len(m.meshes[i].buf)},
+			Offsets:   m.meshes[i].offsets,
+		}
 	}
 
 	for i, g := range m.geosets {
@@ -226,7 +279,7 @@ func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
 			Priority:  m.priority[i],
 			Alpha:     alphas[i],
 			Layers:    layerRefs,
-			Mesh:      m.meshOffsets[i],
+			Mesh:      lowest.offsets[i],
 		}
 		resp.Vertices += g.VertexCount()
 		resp.Triangles += g.TriangleCount()
@@ -246,8 +299,18 @@ func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-// handleMesh serves GET /api/mesh?path=: the raw mesh buffer built by
-// buildMesh (cached alongside the rest of the parsed model).
+// meshURL is the /api/mesh URL for path; without lod it serves the lowest.
+func meshURL(path string, lod *uint32) string {
+	u := "/api/mesh?path=" + url.QueryEscape(path)
+	if lod != nil {
+		u += "&lod=" + strconv.FormatUint(uint64(*lod), 10)
+	}
+	return u
+}
+
+// handleMesh serves GET /api/mesh?path=&lod=: the raw mesh buffer built by
+// buildMesh (cached alongside the rest of the parsed model); the lowest LOD
+// without lod.
 func (s *Server) handleMesh(w http.ResponseWriter, r *http.Request) {
 	idx, ok := s.lookupModel(w, r)
 	if !ok {
@@ -255,6 +318,20 @@ func (s *Server) handleMesh(w http.ResponseWriter, r *http.Request) {
 	}
 	m := s.getLoaded(idx)
 
+	lm := m.lowest()
+	if v := r.URL.Query().Get("lod"); v != "" {
+		lod, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			badRequest(w, "bad lod parameter")
+			return
+		}
+		var found bool
+		if lm, found = m.meshFor(uint32(lod)); !found {
+			badRequest(w, "model has no LOD "+v)
+			return
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Write(m.mesh)
+	w.Write(lm.buf)
 }
