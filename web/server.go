@@ -16,13 +16,19 @@
 //     "version","chunks","objects","lod","vertices","triangles",
 //     "geosets":[Geoset...],"sequences":[{"name","key","start","end"}...],
 //     "defaultSequence","globalSequences":[...],"editions":[{"path",
-//     "edition","overlays"}...],"mesh":{"url","size"}}.
+//     "edition","overlays"}...],"mesh":{"url","size"},"lods":[LOD...]}.
 //     objects = len(Pivots()), the pose's matrix count; lod = the lowest
 //     LOD (the one in the mesh); vertices/triangles = totals over every
 //     geoset. Geoset: {"material","lod","vertices","triangles","priority",
 //     "alpha","layers":[Layer...],"mesh": MeshOffsets|null} - alpha at the
 //     default sequence's start frame, global clock 0 (1 without
-//     sequences); mesh is null for geosets not at lod. MeshOffsets: byte
+//     sequences); mesh is null for geosets not at the lowest LOD (the lowest
+//     LOD's offsets; see lods[].offsets for the others). LOD: {"lod",
+//     "geosets" (count),"vertices","triangles","mesh":{"url","size"},
+//     "offsets":[MeshOffsets|null...]}; lods is ascending by lod, one per
+//     distinct geoset LOD ([] without geosets), mesh.url is
+//     /api/mesh?path=&lod=N, offsets is parallel to geosets (null for
+//     geosets at another LOD); lods[0] repeats the top-level lod/mesh. MeshOffsets: byte
 //     offsets into the mesh buffer, {"positions","normals",
 //     "uvs":[...one per UV set],"weights","nodes","indices"}; lengths
 //     follow from vertices/triangles. Layer: {"filter" (mdx.FilterMode
@@ -37,8 +43,8 @@
 //     root.Variants(name) sorted by root.SortVariants, including this
 //     model.
 //
-//   - GET /api/mesh?path= -> application/octet-stream, per lowest-LOD
-//     geoset in geoset order: positions float32[3v], normals float32[3v]
+//   - GET /api/mesh?path=&lod= -> application/octet-stream, per geoset at
+//     that LOD (default the lowest) in geoset order: positions float32[3v], normals float32[3v]
 //     (zeros when the geoset has none), each UV set float32[2v], weights
 //     float32[8v], node object ids uint32[8v] (Influences(),
 //     mdx.MaxInfluences = 8 per vertex), indices uint16[3t] padded to 4
@@ -56,8 +62,8 @@
 //     (absolute, clamped by the sampler) and global are uint32. All three
 //     are required.
 //
-// Errors: missing/unparseable parameter, seq outside [-1, len(sequences)),
-// a ckey that isn't 32 hex chars -> 400; path that isn't a listed .mdx
+// Errors: missing/unparseable parameter, a lod the model doesn't have, seq
+// outside [-1, len(sequences)), a ckey that isn't 32 hex chars -> 400; path that isn't a listed .mdx
 // entry, ckey that isn't a .dds entry's, or content not stored locally ->
 // 404 (plain-text body). Wrong method -> 405 (ServeMux). Model parse
 // panics stay panics: net/http recovers them, logs, and drops the
