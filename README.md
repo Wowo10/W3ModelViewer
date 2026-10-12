@@ -8,6 +8,12 @@ desktop window or in a browser.
 The game data stays on your machine: nothing from it is committed, and the
 web viewer only listens on localhost.
 
+## AI disclaimer
+
+AI tools may have been used to assist with writing code and documentation in this
+project. AI-generated content can be inaccurate or incomplete. The project is provided as-is; users are
+responsible for evaluating its behavior and complying with applicable licenses.
+
 ## Requirements
 
 - Go 1.27 or newer.
