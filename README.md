@@ -123,3 +123,8 @@ npm --prefix web run check     # type-check the JS and run its tests
 
 The web page has no build step: the files in `web/static/` are what the
 browser loads, typed with JSDoc comments and checked by `tsc`.
+
+## License
+
+[MIT](LICENSE). Warcraft III game data is not covered and is never part of
+this repository.
