@@ -1,0 +1,174 @@
+name: release
+
+# Builds modelViewer for Linux, Windows and macOS. A pushed v* tag also
+# attaches the archives to a draft GitHub release; a manual run only
+# uploads them as workflow artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # SDL2 is built from source and linked statically, so the binaries don't
+  # need it installed: go-sdl2's bundled static libraries are too old for
+  # cimgui-go's SDL backend (no SDL_OpenURL), and Homebrew's and newer
+  # distros' SDL2 is sdl2-compat, which needs SDL3 at run time.
+  SDL_VERSION: 2.32.10
+
+jobs:
+  linux:
+    # The oldest supported runner, so the binary runs on older glibc too.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install X11, Wayland and OpenGL headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdbus-1-dev
+      - name: Build SDL2
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-$SDL_VERSION.tar.gz" | tar xz
+          cd "SDL2-$SDL_VERSION"
+          ./configure --prefix="$RUNNER_TEMP/sdl" --disable-shared --enable-static
+          make -j"$(nproc)" install
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+          PKG_CONFIG: pkg-config --static
+        run: |
+          export PKG_CONFIG_PATH="$RUNNER_TEMP/sdl/lib/pkgconfig"
+          go build -trimpath -ldflags '-s -w -extldflags "-static-libstdc++ -static-libgcc"' -o build/modelViewer .
+      - name: Package
+        run: |
+          name="modelViewer-$GITHUB_REF_NAME-linux-amd64"
+          mkdir "$name"
+          cp build/modelViewer README.md LICENSE "$name/"
+          tar -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64
+          path: modelViewer-*.tar.gz
+
+  macos:
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build SDL2 (arm64 and x86_64)
+        run: |
+          command -v pkg-config || brew install pkgconf
+          cd "$RUNNER_TEMP"
+          curl -sSfL "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-$SDL_VERSION.tar.gz" | tar xz
+          cmake -S "SDL2-$SDL_VERSION" -B sdl-build -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdl"
+          cmake --build sdl-build --parallel
+          cmake --install sdl-build
+      - name: Build universal binary
+        env:
+          CGO_ENABLED: "1"
+          PKG_CONFIG: pkg-config --static
+          # SDL's pkg-config file weak-links GameController and Metal,
+          # a linker flag cgo rejects unless allowed.
+          CGO_LDFLAGS_ALLOW: "-Wl,-weak_framework,.*"
+        run: |
+          export PKG_CONFIG_PATH="$RUNNER_TEMP/sdl/lib/pkgconfig"
+          for arch in arm64 amd64; do
+            GOARCH=$arch go build -trimpath -ldflags '-s -w' -o "build/modelViewer-$arch" .
+          done
+          lipo -create -output build/modelViewer build/modelViewer-arm64 build/modelViewer-amd64
+      - name: Package
+        run: |
+          name="modelViewer-$GITHUB_REF_NAME-macos-universal"
+          mkdir "$name"
+          cp build/modelViewer README.md LICENSE "$name/"
+          tar -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: modelViewer-*.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          # Keeps the Go from setup-go on PATH, behind MinGW's gcc.
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            zip
+      - name: Build SDL2
+        run: |
+          tmp=$(cygpath -m "$RUNNER_TEMP")
+          cd "$tmp"
+          curl -sSfL "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-$SDL_VERSION.tar.gz" | tar xz
+          cmake -G Ninja -S "SDL2-$SDL_VERSION" -B sdl-build -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF \
+            -DCMAKE_INSTALL_PREFIX="$tmp/sdl"
+          cmake --build sdl-build
+          cmake --install sdl-build
+      - name: Build
+        run: |
+          tmp=$(cygpath -m "$RUNNER_TEMP")
+          export PKG_CONFIG_PATH="$tmp/sdl/lib/pkgconfig"
+          # go-sdl2 links -lSDL2 without pkg-config on Windows: add the
+          # include path and SDL's static dependencies, minus SDL2main,
+          # which would take over main.
+          libs=$(pkg-config --static --libs-only-l sdl2 | sed -e 's/-lmingw32//' -e 's/-lSDL2main//')
+          export CGO_ENABLED=1 CC=gcc CGO_CFLAGS="-I$tmp/sdl/include" CGO_LDFLAGS="-L$tmp/sdl/lib $libs"
+          go build -trimpath -ldflags '-s -w -extldflags "-static"' -o build/modelViewer.exe .
+      - name: Package
+        run: |
+          name="modelViewer-$GITHUB_REF_NAME-windows-amd64"
+          mkdir "$name"
+          cp build/modelViewer.exe README.md LICENSE "$name/"
+          zip -r "$name.zip" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64
+          path: modelViewer-*.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --draft --generate-notes --title "modelViewer $GITHUB_REF_NAME"

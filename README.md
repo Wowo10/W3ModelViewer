@@ -14,6 +14,19 @@ AI tools may have been used to assist with writing code and documentation in thi
 project. AI-generated content can be inaccurate or incomplete. The project is provided as-is; users are
 responsible for evaluating its behavior and complying with applicable licenses.
 
+## Download
+
+Prebuilt binaries for Linux (x86-64), Windows (x86-64) and macOS (Apple
+Silicon and Intel) are on the
+[releases page](https://github.com/Wowo10/W3ModelViewer/releases). SDL2 is
+built in; you only need OpenGL 3.2 drivers. Unpack the archive and run
+`modelViewer` (`modelViewer.exe` on Windows): it asks for the Warcraft III
+folder on first start and saves it in `modelViewer.json` next to the binary.
+`modelViewer -web` then serves the same install in a browser.
+
+The macOS binary isn't signed, so macOS blocks it at first; allow it once
+with `xattr -d com.apple.quarantine modelViewer`.
+
 ## Requirements
 
 - Go 1.27 or newer.
@@ -123,6 +136,12 @@ npm --prefix web run check     # type-check the JS and run its tests
 
 The web page has no build step: the files in `web/static/` are what the
 browser loads, typed with JSDoc comments and checked by `tsc`.
+
+**Releases.** Pushing a `v*` tag runs `.github/workflows/release.yml`: it
+builds the three platforms on GitHub's runners, with SDL2 compiled from
+source and linked statically, and creates a draft release with the archives
+to review and publish. Running the workflow by hand from the Actions tab
+builds the same archives as downloadable artifacts, without a release.
 
 ## License
 
