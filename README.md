@@ -19,7 +19,8 @@ responsible for evaluating its behavior and complying with applicable licenses.
 Prebuilt binaries for Linux (x86-64), Windows (x86-64) and macOS (Apple
 Silicon and Intel) are on the
 [releases page](https://github.com/Wowo10/W3ModelViewer/releases). SDL2 is
-built in; you only need OpenGL 3.2 drivers. Unpack the archive and run
+built in; you only need OpenGL 3.2 drivers (and, on Linux, a distribution
+from 2024 or later, such as Ubuntu 24.04 or Debian 13). Unpack the archive and run
 `modelViewer` (`modelViewer.exe` on Windows): it asks for the Warcraft III
 folder on first start and saves it in `modelViewer.json` next to the binary.
 `modelViewer -web` then serves the same install in a browser.

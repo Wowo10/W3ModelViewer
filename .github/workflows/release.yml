@@ -20,8 +20,9 @@ env:
 
 jobs:
   linux:
-    # The oldest supported runner, so the binary runs on older glibc too.
-    runs-on: ubuntu-22.04
+    # Not older: cimgui-go's prebuilt cimgui.a was built on Ubuntu 24.04
+    # and needs glibc 2.38+ (__isoc23_sscanf), so it won't link on 22.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
