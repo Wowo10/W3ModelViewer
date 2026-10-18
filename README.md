@@ -140,8 +140,8 @@ browser loads, typed with JSDoc comments and checked by `tsc`.
 
 **Releases.** Pushing a `v*` tag runs `.github/workflows/release.yml`: it
 builds the three platforms on GitHub's runners, with SDL2 compiled from
-source and linked statically, and creates a draft release with the archives
-to review and publish. Running the workflow by hand from the Actions tab
+source and linked statically, and publishes a release with the archives
+attached. Running the workflow by hand from the Actions tab
 builds the same archives as downloadable artifacts, without a release.
 
 ## License
