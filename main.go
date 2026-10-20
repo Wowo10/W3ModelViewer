@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"modelView/console"
 	"modelView/extract/blte"
 	"modelView/extract/buildConfig"
 	"modelView/extract/buildinfo"
@@ -30,7 +31,13 @@ import (
 // -mdxinfo own stdout.
 var out io.Writer = os.Stdout
 
+// crashLogName is the crash log's file name, next to modelViewer.json.
+const crashLogName = "modelViewer-crash.log"
+
 func main() {
+	hasConsole := console.Attach()
+	out = os.Stdout // Attach may have replaced os.Stdout
+
 	view := flag.Bool("view", false, "no longer needed: the viewer opens when no output flag is given; with an output flag, -view also opens it afterwards")
 	verify := flag.Bool("verify", true, "cross-check idx entries against archive headers")
 	debug := flag.Bool("debug", false, "print debug output from the extract packages")
@@ -49,6 +56,9 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if !hasConsole {
+		startCrashLog()
+	}
 	if *list || *variants != "" || *mdxinfo != "" {
 		out = os.Stderr
 	}
@@ -87,6 +97,19 @@ func main() {
 	if *view || !cli {
 		runViewer(*verify)
 	}
+
+	console.Finish()
+}
+
+// startCrashLog logs fatal panics to a file next to modelViewer.json, for a
+// run that has no console to show them on.
+func startCrashLog() {
+	path, err := settings.Path()
+	if err != nil {
+		return
+	}
+
+	console.CrashLog(filepath.Join(filepath.Dir(path), crashLogName))
 }
 
 // openArchive opens the local idx packages under dir and reads the build
@@ -553,6 +576,7 @@ func runViewer(verify bool) {
 
 	if err := viewer.Run(viewer.DefaultConfig(), start); err != nil {
 		fmt.Fprintln(os.Stderr, "viewer:", err)
+		console.Finish()
 		os.Exit(1)
 	}
 }
