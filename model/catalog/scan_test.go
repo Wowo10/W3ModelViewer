@@ -16,7 +16,7 @@ import (
 )
 
 // TestMain chdirs to the repo root (go test runs in the package dir),
-// matching web's TestMain, so wardata-relative paths resolve the same way.
+// so wardata-relative paths resolve as they do for the binary.
 func TestMain(m *testing.M) {
 	if err := os.Chdir("../.."); err != nil {
 		fmt.Println("catalog: chdir ../..:", err)
@@ -197,8 +197,8 @@ func filteredRoot(fullRoot root.Root, extra ...string) root.Root {
 	return r
 }
 
-// openTestStorage mirrors web.openTestStorage: main.go's start-up with
-// verify off, for fast test runs against real wardata.
+// openTestStorage is main.go's start-up with verify off, for fast test runs
+// against real wardata.
 func openTestStorage(t *testing.T) (*casc.Storage, root.Root) {
 	t.Helper()
 

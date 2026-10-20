@@ -206,7 +206,7 @@ func (c *Catalog) scanOne(storage *casc.Storage, ckey [16]byte) {
 }
 
 // stored reports whether ckey's content is stored locally, without reading
-// it (mirrors web.Server.stored).
+// it.
 func stored(storage *casc.Storage, ckey [16]byte) bool {
 	encEntry, exists := storage.LookupCKey(ckey)
 	if !exists {
