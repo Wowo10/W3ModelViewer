@@ -1,10 +1,7 @@
-.PHONY: build run web
+.PHONY: build run
 
 build:
 	go build -o modelViewer .
 
 run: build
 	./modelViewer $(ARGS)
-
-web: build
-	./modelViewer -web $(ARGS)
