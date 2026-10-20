@@ -31,7 +31,7 @@ mode the only files you may write are roadmap task files. If the task has no
   - `extract/blte`, `extract/encoding` — BLTE decoding and the encoding file.
   - `extract/casc` — `Storage`: lookups and reads by encoding or content key.
   - `viewer` — SDL2 + OpenGL 3.2 + cimgui-go window.
-  - `web` — Node checks and, from WEB-03, the browser viewer.
+  - `settings` — `modelViewer.json` and install folder checks.
 - `wardata/` is real game data (git-ignored). Use it to ground claims with
   numbers — file counts, sizes, entry counts — instead of estimating. Probe
   with throwaway programs in the scratchpad, never in the repo (a stray

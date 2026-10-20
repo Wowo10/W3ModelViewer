@@ -51,9 +51,6 @@ binaries, probes and output files, not `/tmp` or the repo (for a probe that
 imports this module, see the recipe in the `/plan` skill).
 
 1. `gofmt -l .` prints nothing, `go vet ./...` passes, `go build ./...` succeeds.
-   When `web/` changes (or once `web/package.json` exists), `npm --prefix web
-   ci` if `web/node_modules` is missing, then `npm --prefix web run check`
-   passes.
 2. Compare the program's output before and after the change:
    - Build the new binary: `go build -o <scratchpad>/new .`
    - Build the old binary from a worktree of the base, leaving the working
@@ -71,7 +68,7 @@ imports this module, see the recipe in the `/plan` skill).
    scratchpad with that panic disabled — never edit the real code for this.
 5. The viewer (`make run`, or the binary with no output flag) needs a display and
    someone to look at it; at most smoke-test it, say what was checked and leave
-   `[owner]` criteria to the owner. Without an output flag (`-list`, `-variants`, `-extract`, `-mdxinfo`, `-survey`) the program opens the desktop viewer, which never exits by itself: start it only under a time limit (e.g. `timeout 15 ./modelViewer`, as a smoke test that it opens without panicking), never bare. Old "default run unchanged" checks no longer apply; compare output flags instead. `-web` also serves until killed: run it with `timeout` or in the background and stop it.
+   `[owner]` criteria to the owner. Without an output flag (`-list`, `-variants`, `-extract`, `-mdxinfo`, `-survey`) the program opens the desktop viewer, which never exits by itself: start it only under a time limit (e.g. `timeout 15 ./modelViewer`, as a smoke test that it opens without panicking), never bare. Old "default run unchanged" checks no longer apply; compare output flags instead.
 
 ## Report
 
