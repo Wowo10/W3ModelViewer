@@ -12,18 +12,14 @@ import (
 // FileName is the config file's name.
 const FileName = "modelViewer.json"
 
-// DefaultPort is the web viewer's port when modelViewer.json has none.
-const DefaultPort = 8001
-
 // Settings is the content of modelViewer.json.
 type Settings struct {
 	InstallPath string `json:"installPath"`
-	Port        int    `json:"port"`
 }
 
 // Defaults returns the Settings of a file that has no fields yet.
 func Defaults() Settings {
-	return Settings{Port: DefaultPort}
+	return Settings{}
 }
 
 // Path returns where modelViewer.json lives: next to the running

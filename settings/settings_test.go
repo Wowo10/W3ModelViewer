@@ -3,7 +3,6 @@ package settings
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -96,8 +95,8 @@ func TestLoadCreatesMissingFile(t *testing.T) {
 	if string(data) != mustMarshal(t, Defaults()) {
 		t.Errorf("created file = %q, want %q", data, mustMarshal(t, Defaults()))
 	}
-	if !strings.Contains(string(data), `"port": 8001`) {
-		t.Errorf("created file = %q, want \"port\": 8001", data)
+	if want := "{\n  \"installPath\": \"\"\n}\n"; string(data) != want {
+		t.Errorf("created file = %q, want %q", data, want)
 	}
 }
 
@@ -127,7 +126,7 @@ func TestLoadCorruptFile(t *testing.T) {
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
-	want := Settings{InstallPath: "/opt/Warcraft III", Port: 9000}
+	want := Settings{InstallPath: "/opt/Warcraft III"}
 
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)
@@ -167,4 +166,52 @@ func mustMarshal(t *testing.T, s Settings) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestLoadKeepsFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	content := []byte("{\"installPath\": \"/x\"}\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.InstallPath != "/x" {
+		t.Errorf("Load = %+v, want installPath /x", s)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(content) {
+		t.Errorf("file rewritten: %q", data)
+	}
+}
+
+func TestLoadIgnoresPort(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	content := []byte("{\"installPath\": \"/x\", \"port\": 8001}\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s != (Settings{InstallPath: "/x"}) {
+		t.Errorf("Load = %+v, want installPath /x", s)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(content) {
+		t.Errorf("file rewritten: %q", data)
+	}
 }
