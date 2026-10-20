@@ -144,7 +144,8 @@ jobs:
           # which would take over main.
           libs=$(pkg-config --static --libs-only-l sdl2 | sed -e 's/-lmingw32//' -e 's/-lSDL2main//')
           export CGO_ENABLED=1 CC=gcc CGO_CFLAGS="-I$tmp/sdl/include" CGO_LDFLAGS="-L$tmp/sdl/lib $libs"
-          go build -trimpath -ldflags '-s -w -extldflags "-static"' -o build/modelViewer.exe .
+          # GUI program: no console window; main attaches to the terminal's console itself.
+          go build -trimpath -ldflags '-s -w -H windowsgui -extldflags "-static"' -o build/modelViewer.exe .
       - name: Package
         run: |
           name="modelViewer-$GITHUB_REF_NAME-windows-amd64"
