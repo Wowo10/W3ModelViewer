@@ -23,6 +23,14 @@ from 2024 or later, such as Ubuntu 24.04 or Debian 13). Unpack the archive and r
 `modelViewer` (`modelViewer.exe` on Windows): it asks for the Warcraft III
 folder on first start and saves it in `modelViewer.json` next to the binary.
 
+On Windows `modelViewer.exe` is a GUI program, so double-clicking it opens
+only the viewer window. The output flags (`-h`, `-list`, `-mdxinfo`, …) still
+print in a terminal, but `cmd.exe` and PowerShell don't wait for it, so the
+output can appear after the prompt; redirecting it to a file
+(`modelViewer.exe -list > files.txt`) always works. If the viewer crashes
+with no console, the panic is written to `modelViewer-crash.log` next to
+`modelViewer.json`.
+
 The macOS binary isn't signed, so macOS blocks it at first; allow it once
 with `xattr -d com.apple.quarantine modelViewer`.
 
