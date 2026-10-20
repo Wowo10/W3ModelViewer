@@ -2,8 +2,6 @@ module modelView
 
 go 1.27.1
 
-ignore ./web/node_modules
-
 require (
 	github.com/AllenDang/cimgui-go v1.6.0 // indirect
 	github.com/akavel/rsrc v0.10.2 // indirect
