@@ -6,32 +6,64 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
-
-var filenames = []string{
-	"0a0000001c.idx",
-	"0b0000001b.idx",
-	"0c0000001b.idx",
-	"0d0000001b.idx",
-	"0e0000001c.idx",
-	"0f0000001b.idx",
-	"000000001b.idx",
-	"010000001b.idx",
-	"020000001c.idx",
-	"030000001b.idx",
-	"040000001b.idx",
-	"050000001a.idx",
-	"060000001b.idx",
-	"070000001b.idx",
-	"080000001b.idx",
-	"090000001c.idx",
-}
 
 var DEBUG = false
 
-// Filenames returns the idx files ReadIdxPackages reads, in order.
-func Filenames() []string {
-	return append([]string(nil), filenames...)
+const bucketCount = 16
+
+// Filenames returns the idx files ReadIdxPackages reads under dataDir, one
+// per bucket in bucket order. An idx file is named after its bucket (2 hex
+// digits) and version (8 hex digits); an update writes new versions and can
+// leave the old ones behind, pointing at stale data, so each bucket's
+// highest version is taken. It fails if a bucket has no idx file.
+func Filenames(dataDir string) ([]string, error) {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var names [bucketCount]string
+	var versions [bucketCount]uint64
+	for _, e := range entries {
+		bucket, version, ok := parseIdxName(e.Name())
+		if !ok || bucket >= bucketCount {
+			continue
+		}
+		if names[bucket] == "" || version > versions[bucket] {
+			names[bucket], versions[bucket] = e.Name(), version
+		}
+	}
+
+	for bucket, name := range names {
+		if name == "" {
+			return nil, fmt.Errorf("no idx file for bucket %02x", bucket)
+		}
+	}
+
+	return names[:], nil
+}
+
+// parseIdxName splits an idx file name such as "0a0000001c.idx" into its
+// bucket and version.
+func parseIdxName(name string) (bucket, version uint64, ok bool) {
+	stem, found := strings.CutSuffix(name, ".idx")
+	if !found || len(stem) != 10 {
+		return 0, 0, false
+	}
+
+	bucket, err := strconv.ParseUint(stem[:2], 16, 8)
+	if err != nil {
+		return 0, 0, false
+	}
+	version, err = strconv.ParseUint(stem[2:], 16, 32)
+	if err != nil {
+		return 0, 0, false
+	}
+
+	return bucket, version, true
 }
 
 const (
@@ -63,6 +95,11 @@ func (i Index) Lookup(ekey []byte) (IndexEntry, bool) {
 // cross-checked against the header stored in its archive.
 func ReadIdxPackages(dataDir string, archives Archives, verify bool) (m Index) {
 	m = make(Index)
+
+	filenames, err := Filenames(dataDir)
+	if err != nil {
+		panic(err)
+	}
 
 	for _, filename := range filenames {
 		path := filepath.Join(dataDir, filename)

@@ -10,8 +10,8 @@ import (
 
 // CheckInstall reports why dir isn't a usable Warcraft III install, or nil
 // when it is: dir exists and is a directory, has a .build.info with a
-// 32-char hex build key, that build's config under Data/config and every
-// idx file idxPackages reads under Data/data.
+// 32-char hex build key, that build's config under Data/config and an idx
+// file for every bucket under Data/data.
 func CheckInstall(dir string) error {
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -38,10 +38,8 @@ func CheckInstall(dir string) error {
 	}
 
 	dataDir := filepath.Join(dir, "Data", "data")
-	for _, name := range idxPackages.Filenames() {
-		if _, err := os.Stat(filepath.Join(dataDir, name)); err != nil {
-			return fmt.Errorf("no Data/data/%s", name)
-		}
+	if _, err := idxPackages.Filenames(dataDir); err != nil {
+		return fmt.Errorf("Data/data: %v", err)
 	}
 
 	return nil

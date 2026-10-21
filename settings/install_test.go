@@ -1,7 +1,7 @@
 package settings
 
 import (
-	"modelView/extract/idxPackages"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +10,7 @@ import (
 const testBuildKey = "0123456789abcdef0123456789abcdef"
 
 // makeFakeInstall builds a minimal install under dir: .build.info with
-// testBuildKey, its build config and the 16 idx files idxPackages reads.
+// testBuildKey, its build config and an idx file for each of the 16 buckets.
 func makeFakeInstall(t *testing.T, dir string) {
 	t.Helper()
 
@@ -31,7 +31,8 @@ func makeFakeInstall(t *testing.T, dir string) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range idxPackages.Filenames() {
+	for bucket := range 16 {
+		name := fmt.Sprintf("%02x0000001b.idx", bucket)
 		if err := os.WriteFile(filepath.Join(dataDir, name), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -82,10 +83,10 @@ func TestCheckInstallMissingBuildInfo(t *testing.T) {
 func TestCheckInstallMissingIdxFile(t *testing.T) {
 	dir := t.TempDir()
 	makeFakeInstall(t, dir)
-	missing := idxPackages.Filenames()[0]
-	if err := os.Remove(filepath.Join(dir, "Data", "data", missing)); err != nil {
+	if err := os.Remove(filepath.Join(dir, "Data", "data", "0a0000001b.idx")); err != nil {
 		t.Fatal(err)
 	}
+	missing := "bucket 0a"
 
 	err := CheckInstall(dir)
 	if err == nil {
